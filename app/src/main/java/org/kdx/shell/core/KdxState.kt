@@ -261,6 +261,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
             runCatching {
                 withContext(Dispatchers.IO) {
                     disp.start((wDp * f).toInt(), (hDp * f).toInt())
+                    disp.relaunch = { start(disp) }
                     disp.appProcess = start(disp)
                 }
             }.onFailure { e -> toast("Couldn't start $title: ${e.message}"); close(w) }

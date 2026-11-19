@@ -44,6 +44,11 @@ class LinuxDisplay(
         // Libraries that start their own bubblewrap sandbox fail under proot (no kernel namespaces on Android):
         // glycin = GNOME's image loader (every recent GNOME app that shows pictures), WebKitGTK web processes.
         "GLYCIN_DISABLE_SANDBOX" to "1",
+        // Firefox: its seccomp/namespace sandboxes clash with Android's app restrictions under proot and take
+        // the browser down; turn them off the way Termux/proot-distro users do
+        "MOZ_DISABLE_CONTENT_SANDBOX" to "1", "MOZ_DISABLE_GMP_SANDBOX" to "1", "MOZ_DISABLE_RDD_SANDBOX" to "1",
+        "MOZ_DISABLE_SOCKET_PROCESS_SANDBOX" to "1", "MOZ_DISABLE_UTILITY_SANDBOX" to "1", "MOZ_DISABLE_GPU_SANDBOX" to "1",
+        "MOZ_DISABLE_VR_SANDBOX" to "1", "MOZ_FAKE_NO_SANDBOX" to "1", "MOZ_CRASHREPORTER_DISABLE" to "1",
         "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS" to "1", "WEBKIT_FORCE_SANDBOX" to "0",
     )
 
@@ -96,6 +101,14 @@ class LinuxDisplay(
 
     /** True while any program other than the X server and window manager runs on this display. */
     @Volatile var appProcess: Process? = null
+        set(v) { field = v; appStartedAt = System.currentTimeMillis() }
+    @Volatile var appStartedAt = 0L
+        private set
+    /** Starts the app again (set by whoever launched it). */
+    @Volatile var relaunch: (() -> Process)? = null
+
+    /** The app's own output lines (no X server / bus chatter), for the "app stopped" panel. */
+    fun appLog(): List<String> = log.filter { !it.startsWith("Xvnc:") && !it.startsWith("dbus:") && !it.startsWith("openbox:") }
 
     /** Starts a GUI program on this display. */
     fun launch(cmd: String, extraEnv: Map<String, String> = emptyMap()): Process =
@@ -117,7 +130,7 @@ class LinuxDisplay(
     }
 
     fun drain(p: Process, tag: String) = Thread {
-        runCatching { p.inputStream.bufferedReader().forEachLine { log.add("$tag: $it"); while (log.size > 200) log.pollFirst() } }
+        runCatching { p.inputStream.bufferedReader().forEachLine { log.add("$tag: $it"); while (log.size > 400) log.pollFirst() } }
     }.apply { isDaemon = true }.start()
 
     private fun <T> java.util.Deque<T>.takeLast(n: Int) = toList().takeLast(n)

@@ -60,7 +60,11 @@ Linux software:
   Electron apps, and turns off Chromium/Electron's internal sandbox (it needs kernel namespaces). Libraries that
   run helpers in their own bubblewrap sandbox – glycin (image loading in GNOME 47+ apps) and WebKitGTK – are given a
   `bwrap` that reports "no namespaces", so they run the helpers directly instead of failing. Verified with
-  **Kitties** (`io.github.Micro856.KittiesGtk`, GNOME 51 runtime): it starts, fetches and shows pictures. Not supported:
+  **Kitties** (`io.github.Micro856.KittiesGtk`, GNOME 51 runtime): it starts, fetches and shows pictures.
+  Firefox's own sandboxes (seccomp/namespaces) are turned off with Mozilla's `MOZ_DISABLE_*_SANDBOX` variables, as
+  Termux users do; **Firefox** (`org.mozilla.firefox`) starts and renders pages this way.
+- If a Linux app stops right after starting or with an error, its window stays open and explains why (e.g. Android
+  ended it for memory, a blocked system call, a crash) with the app's log, **Restart** and **Copy log**. Not supported:
   "extra-data" apps that download proprietary files at install time (they need bubblewrap), and apps that require a
   real GPU (rendering is software-only).
 - Installed Debian and Flatpak apps appear in **Kickoff → Applications → Linux** with their own icons.

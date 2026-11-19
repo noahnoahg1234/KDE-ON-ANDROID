@@ -60,6 +60,8 @@ class DisplaySession : Closeable {
     var touchMode by mutableStateOf(true)
     var modifiers by mutableIntStateOf(0) // bit0 ctrl, bit1 alt, bit2 super (sticky)
     var onClose: () -> Unit = {}
+    /** Set when the app stopped unexpectedly: exit code and its last log lines. */
+    var crash by mutableStateOf<Pair<Int, List<String>>?>(null)
 
     fun connect(port: Int) {
         if (connected) return
@@ -132,19 +134,32 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
         s.connect(disp.port)
     }
     if (appNo != null) {
-        // the KDX window follows the app: its window title, and it closes when the app quits
-        LaunchedEffect(disp) {
-            var seenAlive = false
+        // The KDX window follows the app: it takes its window title, and closes when the app quits normally.
+        // If the app stops right away or with an error, keep the window open and show why.
+        LaunchedEffect(disp, s.crash) {
+            if (s.crash != null) return@LaunchedEffect
             while (true) {
-                delay(2000)
-                val p = disp.appProcess
-                if (p != null) {
-                    if (p.isAlive) seenAlive = true
-                    else if (seenAlive || s.connected) { state.toast("$appName closed"); state.close(w); break }
+                delay(1500)
+                val p = disp.appProcess ?: continue
+                if (!p.isAlive) {
+                    val code = runCatching { p.exitValue() }.getOrDefault(-1)
+                    val ran = System.currentTimeMillis() - disp.appStartedAt
+                    if (ran < 20_000 || code !in setOf(0, 130, 143)) { s.crash = code to disp.appLog().takeLast(80) }
+                    else { state.toast("$appName closed"); state.close(w) }
+                    break
                 }
                 val t = withContext(Dispatchers.IO) { disp.windowTitle() }
                 w.title = t?.takeIf { it.isNotBlank() } ?: appName
             }
+        }
+        s.crash?.let { (code, lines) ->
+            CrashPanel(state, appName, code, lines,
+                restart = {
+                    s.crash = null
+                    s.scope.launch(Dispatchers.IO) { disp.relaunch?.let { disp.appProcess = it() } }
+                },
+                close = { state.close(w) })
+            return
         }
     }
     val focus = remember { FocusRequester() }
@@ -353,4 +368,44 @@ private fun hardwareKey(s: DisplaySession, e: KeyEvent): Boolean {
     }
     rfb.key(sym, e.type == KeyEventType.KeyDown)
     return true
+}
+
+/** Shown instead of silently closing when a Linux app stops right away or with an error. */
+@Composable
+private fun CrashPanel(state: KdxState, app: String, code: Int, log: List<String>, restart: () -> Unit, close: () -> Unit) {
+    val c = LocalBreeze.current
+    // proot reports "killed by signal N" as 128+N
+    val why = when (code) {
+        137, -9 -> "Android ended it – usually because the phone ran low on memory. Close other apps and try again."
+        159 -> "It used a system call Android doesn't allow apps to make (SIGSYS)."
+        139 -> "It crashed (segmentation fault)."
+        134 -> "It aborted (SIGABRT) – see the log below."
+        0 -> "It exited by itself right after starting."
+        else -> "It exited with code $code – see the log below."
+    }
+    Column(Modifier.fillMaxSize().background(c.window).padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.ErrorOutline, null, tint = c.negative, modifier = Modifier.size(32.dp))
+            Spacer(Modifier.width(10.dp))
+            Text("$app stopped", color = c.text, fontSize = 20.sp)
+        }
+        Text(why, color = c.text, fontSize = 14.sp, modifier = Modifier.padding(vertical = 8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(restart) { Text("Restart") }
+            OutlinedButton({ state.copyText("$app exited with code $code\n" + log.joinToString("\n")); state.toast("Log copied") }) { Text("Copy log") }
+            OutlinedButton(close) { Text("Close") }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text("Log", color = c.inactiveText, fontSize = 12.sp)
+        androidx.compose.foundation.lazy.LazyColumn(
+            Modifier.fillMaxWidth().weight(1f).background(Color(0xFF232627)).padding(6.dp),
+            reverseLayout = true,
+        ) {
+            items(log.reversed()) { l ->
+                Text(l.substringAfter(": ", l), color = Color(0xFFEFF0F1), fontSize = 11.sp,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+            }
+            if (log.isEmpty()) item { Text("(the app printed nothing)", color = Color(0xFF9DA7B3), fontSize = 11.sp) }
+        }
+    }
 }
