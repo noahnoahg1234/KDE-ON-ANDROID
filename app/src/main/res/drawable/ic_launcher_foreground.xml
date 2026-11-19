@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- outer ring -->
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="4"
+        android:pathData="M54,25 a29,29 0 1,1 -0.01,0z" />
+    <!-- K stem -->
+    <path android:fillColor="#FFFFFFFF" android:pathData="M38,38h6v32h-6z" />
+    <!-- K arms, extended into an X -->
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="6" android:strokeLineCap="round"
+        android:pathData="M46,54 L68,36 M46,54 L68,72" />
+    <path android:fillColor="#00000000" android:strokeColor="#9FD8FF"
+        android:strokeWidth="3" android:strokeLineCap="round"
+        android:pathData="M58,46 L72,60" />
+</vector>
