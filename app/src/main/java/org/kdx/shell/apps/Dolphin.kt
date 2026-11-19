@@ -313,11 +313,8 @@ fun Dolphin(state: KdxState, w: KWindow) {
                 Text("KDX can only see its own folder. Grant file access to browse your storage.",
                     Modifier.weight(1f).padding(horizontal = 8.dp), color = c.text, fontSize = 12.sp)
                 TextButton({
-                    if (Build.VERSION.SDK_INT >= 30) {
-                        runCatching {
-                            ctx.startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                        }.onFailure { ctx.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                    } else permLauncher.launch(arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE, android.Manifest.permission.WRITE_EXTERNAL_STORAGE))
+                    // KDX targets Android 9, so the classic storage permission covers all of shared storage.
+                    permLauncher.launch(arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE, android.Manifest.permission.WRITE_EXTERNAL_STORAGE))
                 }) { Text("Grant") }
             }
         }

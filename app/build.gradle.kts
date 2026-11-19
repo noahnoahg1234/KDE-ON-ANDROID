@@ -25,9 +25,13 @@ android {
     defaultConfig {
         applicationId = "org.kdx.shell"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        // Android 9 target, like Termux: apps targeting 10+ may not execute programs they download,
+        // which DroidSystem needs to run Debian's Linux programs (via proot). Install by sideloading.
+        targetSdk = 28
+        versionCode = 2
+        versionName = "2.0.0"
+        // proot is bundled for these CPUs (see app/src/main/jniLibs)
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
     }
 
     buildTypes {
@@ -45,7 +49,21 @@ android {
     kotlinOptions { jvmTarget = "17" }
     testOptions {
         unitTests.isIncludeAndroidResources = true
-        unitTests.all { it.systemProperty("robolectric.graphicsMode", "NATIVE"); it.maxHeapSize = "2g" }
+        unitTests.all {
+            it.systemProperty("robolectric.graphicsMode", "NATIVE")
+            it.maxHeapSize = "2g"
+            it.environment("LC_ALL", "C.UTF-8") // Debian packages contain UTF-8 file names
+            System.getenv("KDX_EXTRA_CA")?.let { ca -> it.environment("KDX_EXTRA_CA", ca) }
+            // Opt-in Debian/proot integration test: ./gradlew testDebugUnitTest -Pkdx.integration=/some/dir
+            project.findProperty("kdx.integration")?.let { dir -> it.systemProperty("kdx.integration", dir.toString()); it.outputs.upToDateWhen { false } }
+        }
+    }
+    packaging {
+        // proot ships as lib*.so so Android installs it executable; keep the files on disk, unmodified
+        jniLibs { useLegacyPackaging = true; keepDebugSymbols += "**/*.so" }
+    }
+    lint {
+        disable += setOf("ExpiredTargetSdkVersion", "OldTargetApi")
     }
     buildFeatures {
         compose = true

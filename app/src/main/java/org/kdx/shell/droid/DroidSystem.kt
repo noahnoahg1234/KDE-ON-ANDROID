@@ -575,7 +575,13 @@ class DroidSystem(private val ctx: Context, val root: File) {
     }
 
     // ------------------------------------------------------------------ desktop entries
-    data class DesktopEntry(val file: File, val name: String, val comment: String, val exec: String, val flatpakId: String?) {
+    /** Where a launcher comes from: DroidSystem's own apps, Debian (apt) or Flathub (real Flatpak). */
+    enum class EntrySource { CLASSIC, DEBIAN, FLATHUB }
+
+    data class DesktopEntry(
+        val file: File, val name: String, val comment: String, val exec: String, val flatpakId: String?,
+        val source: EntrySource = EntrySource.CLASSIC, val terminal: Boolean = true, val icon: File? = null,
+    ) {
         val key get() = "linux:${file.path}"
 
         /** Entries with `Exec=kdx-app NAME` open a native KDX window (e.g. Bazaar) instead of a terminal. */

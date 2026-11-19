@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,7 +59,11 @@ sealed interface Launchable {
     data class Linux(val entry: DroidSystem.DesktopEntry) : Launchable {
         override val key get() = entry.key
         override val label get() = entry.name
-        override val subtitle get() = (if (entry.flatpakId != null) "Flatpak · " else "DroidSystem · ") + entry.comment.ifEmpty { "Linux app" }
+        override val subtitle get() = when (entry.source) {
+            org.kdx.shell.droid.DroidSystem.EntrySource.FLATHUB -> "Flatpak (Flathub) · "
+            org.kdx.shell.droid.DroidSystem.EntrySource.DEBIAN -> "Debian · "
+            else -> if (entry.flatpakId != null) "Flatpak · " else "DroidSystem · "
+        } + entry.comment.ifEmpty { "Linux app" }
     }
 }
 
@@ -73,14 +78,26 @@ fun KdxState.resolve(key: String): Launchable? =
 fun KdxState.launch(l: Launchable) = when (l) {
     is Launchable.Kdx -> open(l.app)
     is Launchable.Droid -> launch(l.app)
-    is Launchable.Linux -> l.entry.kdxApp?.let { open(it) } ?: open(KApp.KONSOLE, l.entry.exec)
+    is Launchable.Linux -> when {
+        l.entry.kdxApp != null -> open(l.entry.kdxApp!!)
+        l.entry.source == org.kdx.shell.droid.DroidSystem.EntrySource.FLATHUB && l.entry.flatpakId != null -> launchFlatpak(l.entry.flatpakId)
+        l.entry.source == org.kdx.shell.droid.DroidSystem.EntrySource.DEBIAN && !l.entry.terminal -> launchLinuxGui(l.entry.exec)
+        else -> open(KApp.KONSOLE, l.entry.exec)
+    }
 }
 
 @Composable
 fun LaunchableIcon(l: Launchable, size: Dp) {
     when (l) {
         is Launchable.Kdx -> KAppIcon(l.app, size)
-        is Launchable.Linux -> l.entry.kdxApp?.let { KAppIcon(it, size) } ?: Box(
+        is Launchable.Linux -> l.entry.kdxApp?.let { KAppIcon(it, size) } ?: l.entry.icon?.let { f ->
+            val bmp by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, f) {
+                value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching { android.graphics.BitmapFactory.decodeFile(f.path)?.asImageBitmap() }.getOrNull()
+                }
+            }
+            bmp?.let { Image(it, l.label, Modifier.size(size)) } ?: Box(Modifier.size(size))
+        } ?: Box(
             Modifier.size(size).clip(RoundedCornerShape(size / 4))
                 .background(if (l.entry.flatpakId != null) Color(0xFF4A86CF) else Color(0xFFE95420)),
             contentAlignment = Alignment.Center,
@@ -116,6 +133,7 @@ fun KAppIcon(app: KApp, size: Dp) {
         KApp.INFOCENTER -> Color(0xFF2980B9)
         KApp.SETTINGS -> Color(0xFF6C7A89)
         KApp.BAZAAR -> Color(0xFF8E44AD)
+        KApp.LINUXDISPLAY -> Color(0xFFE95420)
     }
     Box(
         Modifier.size(size).clip(RoundedCornerShape(size / 4)).background(tint),

@@ -100,7 +100,18 @@ fun ansiToAnnotated(text: String, base: Color): androidx.compose.ui.text.Annotat
     }
 }
 
-class KonsoleSession(start: File, private val env: Map<String, String>, val droid: DroidSystem? = null) : Closeable {
+class KonsoleSession(
+    start: File,
+    private val env: Map<String, String>,
+    val droid: DroidSystem? = null,
+    /** DroidSystem 2: when set, commands run in Debian's bash through proot. */
+    val debian: org.kdx.shell.droid.DebianSystem? = null,
+    private val guestEnv: Map<String, String> = emptyMap(),
+) : Closeable {
+    /** Current directory inside Debian (DroidSystem 2). */
+    var guestCwd by mutableStateOf("/root")
+    /** Variables set with `export` in this session (Debian mode). */
+    val exports = linkedMapOf<String, String>()
     private var stateRef: KdxState? = null
     val home: File get() = droid?.home ?: stateRef?.homeDir() ?: File("/")
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -115,7 +126,10 @@ class KonsoleSession(start: File, private val env: Map<String, String>, val droi
 
     init {
         val ds = droid
-        if (ds != null) {
+        val deb = debian
+        if (deb != null) {
+            runCatching { File(deb.root, "etc/motd").readLines() }.getOrDefault(emptyList()).forEach { lines += it to 2 }
+        } else if (ds != null) {
             runCatching { File(ds.root, "etc/motd").readLines() }.getOrDefault(emptyList()).forEach { lines += it to 2 }
         } else {
         lines += "Welcome to Konsole for KDX — Android ${android.os.Build.VERSION.RELEASE} (${System.getProperty("os.arch")})" to 2
@@ -124,6 +138,10 @@ class KonsoleSession(start: File, private val env: Map<String, String>, val droi
     }
 
     fun prompt(): String {
+        if (debian != null) {
+            val p = if (guestCwd == "/root" || guestCwd.startsWith("/root/")) "~" + guestCwd.removePrefix("/root") else guestCwd
+            return "root@droidsystem:$p#"
+        }
         val ds = droid
         if (ds != null) {
             val h = ds.home.path
@@ -196,6 +214,18 @@ class KonsoleSession(start: File, private val env: Map<String, String>, val droi
                 "Ctrl+C button stops the running command; input is sent to its stdin.",
             ).map { it to 2 }
             t == "history" -> history.forEachIndexed { i, h -> lines += "%4d  %s".format(i + 1, h) to 0 }
+            debian != null && (t == "cd" || t.startsWith("cd ")) -> {
+                // resolve inside Debian so symlinks, ~ and $VARS behave exactly like bash
+                val deb = debian
+                scope.launch {
+                    val (rc, out) = withContext(Dispatchers.IO) { runCatching { deb.query("$t && pwd", guestCwd) }.getOrDefault(1 to "cd failed") }
+                    if (rc == 0) guestCwd = out.trim().lines().last() else lines += out.trim().ifEmpty { "cd: failed" } to 2
+                }
+            }
+            debian != null && Regex("^export\\s+[A-Za-z_][A-Za-z0-9_]*=.*").matches(t) -> {
+                val kv = t.removePrefix("export").trim()
+                exports[kv.substringBefore('=')] = kv.substringAfter('=').trim('"', '\'')
+            }
             t == "cd" || t.startsWith("cd ") -> {
                 val arg = t.removePrefix("cd").trim().trim('"', '\'')
                 val target = when {
@@ -233,9 +263,15 @@ class KonsoleSession(start: File, private val env: Map<String, String>, val droi
      * [stdinData], if given, is fed to the process and its stdin closed (used for `builtin | command`).
      */
     fun exec(cmd: String, stdinData: String? = null) {
-        val full = droid?.let { (runCatching { it.shellPreamble() }.getOrDefault("")) + cmd } ?: cmd
-        val pb = ProcessBuilder("/system/bin/sh", "-c", full).directory(cwd).redirectErrorStream(true)
-        pb.environment().putAll(env)
+        val deb = debian
+        val pb = if (deb != null) {
+            // Debian bash; DroidSystem's classic commands are added as functions (they live on shared storage)
+            val classic = droid?.let { runCatching { it.shellPreamble() }.getOrDefault("") } ?: ""
+            deb.command(listOf("/bin/bash", "-lc", "shopt -s expand_aliases; [ -f ~/.bashrc ] && . ~/.bashrc\n$classic$cmd"), guestCwd, guestEnv + exports)
+        } else {
+            val full = droid?.let { (runCatching { it.shellPreamble() }.getOrDefault("")) + cmd } ?: cmd
+            ProcessBuilder("/system/bin/sh", "-c", full).directory(cwd).redirectErrorStream(true).also { it.environment().putAll(env) }
+        }
         val proc = runCatching { pb.start() }.getOrElse {
             lines += "konsole: ${it.message}" to 2; return
         }
@@ -304,13 +340,14 @@ fun Konsole(state: KdxState, w: KWindow) {
     val s = remember(w) {
         w.retain("konsole") {
             val ds = state.droid
+            val deb = state.debian
             val home = ds?.home ?: state.homeDir()
             val env = mutableMapOf("HOME" to home.path, "TERM" to "dumb")
             if (ds != null) env += mapOf(
                 "USER" to "user", "LOGNAME" to "user", "HOSTNAME" to "droidsystem",
                 "DROIDSYSTEM_ROOT" to ds.root.path, "XDG_DATA_HOME" to File(home, ".local/share").path,
             )
-            KonsoleSession(home.apply { mkdirs() }, env, ds).also { ks ->
+            KonsoleSession(home.apply { mkdirs() }, env, ds, deb, state.linuxDisplay?.env ?: emptyMap()).also { ks ->
                 // An initial command can be passed by KRunner ("> cmd") or Dolphin ("Open terminal here").
                 w.arg?.let { ks.input = it; ks.submit(state) }
             }
@@ -319,8 +356,9 @@ fun Konsole(state: KdxState, w: KWindow) {
     val list = rememberLazyListState()
     val focus = remember { FocusRequester() }
     LaunchedEffect(s.lines.size) { if (s.lines.isNotEmpty()) list.scrollToItem(s.lines.lastIndex) }
-    LaunchedEffect(s.cwd, s.running) {
-        w.title = "${s.cwd.name.ifEmpty { "/" }} : ${if (s.running != null) "running" else if (s.droid != null) "droidsystem" else "sh"} — Konsole"
+    LaunchedEffect(s.cwd, s.guestCwd, s.running) {
+        w.title = if (s.debian != null) "${s.guestCwd.substringAfterLast('/').ifEmpty { "/" }} : ${if (s.running != null) "running" else "bash"} — Konsole"
+            else "${s.cwd.name.ifEmpty { "/" }} : ${if (s.running != null) "running" else if (s.droid != null) "droidsystem" else "sh"} — Konsole"
     }
     val bg = Color(0xFF232627)
     val fg = Color(0xFFFCFCFC)
@@ -379,12 +417,14 @@ fun Konsole(state: KdxState, w: KWindow) {
 }
 
 private fun complete(s: KonsoleSession) {
+    val deb = s.debian
+    val base = if (deb != null) File(deb.root, s.guestCwd.trimStart('/')) else s.cwd
     val parts = s.input.split(' ')
     val last = parts.last()
     val dir = if (last.contains('/')) {
         val p = last.substringBeforeLast('/')
-        if (last.startsWith("/")) File(p.ifEmpty { "/" }) else File(s.cwd, p)
-    } else s.cwd
+        if (last.startsWith("/")) (if (deb != null) File(deb.root, p.trimStart('/')) else File(p.ifEmpty { "/" })) else File(base, p)
+    } else base
     val prefix = last.substringAfterLast('/')
     val matches = dir.list()?.filter { it.startsWith(prefix) }?.sorted() ?: return
     when {

@@ -48,6 +48,7 @@ fun AppContent(state: KdxState, w: KWindow) {
         KApp.INFOCENTER -> InfoCenter(state)
         KApp.SETTINGS -> SystemSettings(state, w)
         KApp.BAZAAR -> Bazaar(state, w)
+        KApp.LINUXDISPLAY -> LinuxDisplayApp(state, w)
     }
 }
 

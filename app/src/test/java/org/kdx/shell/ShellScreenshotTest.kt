@@ -97,7 +97,7 @@ class ShellScreenshotTest {
 
     @Test fun droidSystem() {
         val dir = java.nio.file.Files.createTempDirectory("ds").toFile()
-        rule.runOnUiThread { state.installDroid(dir) }
+        rule.runOnUiThread { state.autoInstallDebian = false; state.installDroid(dir) }
         var tries = 0
         while ((state.droid == null || state.linuxApps.isEmpty()) && tries++ < 100) { rule.mainClock.advanceTimeBy(100); Thread.sleep(50) }
         assertTrue("DroidSystem should install", state.droid != null)

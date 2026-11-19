@@ -621,8 +621,10 @@ private fun FlathubExplore(state: KdxState, ds: DroidSystem, s: BazaarSession, f
         }
         item {
             Text(
-                "Catalog from flathub.org. Flathub apps are desktop Linux programs: you can browse them and save them for a " +
-                    "Linux PC, while apps marked \"Runs on DroidSystem\" install and run on this phone.",
+                if (state.debian != null) "Catalog from flathub.org. Flathub apps install with real Flatpak into DroidSystem 2 " +
+                    "and open on the Linux Display. Apps marked \"Runs on DroidSystem\" are small terminal apps."
+                else "Catalog from flathub.org. Turn on the Linux system in System Settings to install Flathub apps; " +
+                    "apps marked \"Runs on DroidSystem\" work right away.",
                 Modifier.padding(14.dp), color = c.inactiveText, fontSize = 12.sp,
             )
         }
@@ -742,13 +744,42 @@ private fun FlathubDetail(state: KdxState, ds: DroidSystem, s: BazaarSession, fh
             }
         }
         Spacer(Modifier.height(14.dp))
+        // DroidSystem 2 (Debian) runs real Flatpaks
+        val deb = state.debian
+        val devArch = when (deb?.arch) { "arm64" -> "aarch64"; "amd64" -> "x86_64"; "armhf" -> "arm"; "i386" -> "i386"; else -> null }
+        val archOk = devArch == null || a.arches.isEmpty() || devArch in a.arches
+        var fpInstalled by remember(a.id) { mutableStateOf(state.flatpakRunner?.appDir(a.id) != null) }
+        // notice when an install/uninstall started from here finishes in Konsole
+        LaunchedEffect(a.id, deb) {
+            while (deb != null) {
+                val now = withContext(Dispatchers.IO) { state.flatpakRunner?.appDir(a.id) != null }
+                if (now != fpInstalled) { fpInstalled = now; state.refreshLinuxApps() }
+                kotlinx.coroutines.delay(2500)
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (runnable != null) ActionButton(state, ds, s, runnable, compact = false)
-            else Button({ getDialog = true }) { Text("Install") }
-            OutlinedButton({ state.openUrl("https://flathub.org/apps/${a.id}") }) { Text("Flathub page") }
+            when {
+                runnable != null -> ActionButton(state, ds, s, runnable, compact = false)
+                deb != null && fpInstalled -> {
+                    Button({ state.launchFlatpak(a.id) }) { Text("Open") }
+                    OutlinedButton({ state.open(KApp.KONSOLE, "flatpak uninstall -y ${a.id}") }) { Text("Remove", color = c.negative) }
+                }
+                deb != null && !archOk -> Button({}, enabled = false) { Text("Not built for this phone") }
+                deb != null -> Button({
+                    val setup = if (!deb.hasCommand("usr/bin/flatpak")) "flatpak-setup && " else ""
+                    state.open(KApp.KONSOLE, "${setup}flatpak install -y --noninteractive flathub ${a.id} && echo && echo 'Installed ${a.name}. Open it from Bazaar or Kickoff.'")
+                }) { Text("Install") }
+                else -> Button({ getDialog = true }) { Text("Install") }
+            }
+            if (!(deb != null && fpInstalled)) OutlinedButton({ state.openUrl("https://flathub.org/apps/${a.id}") }) { Text("Flathub page") }
         }
         if (runnable == null) Text(
-            "Desktop Linux app (${a.arches.joinToString().ifEmpty { "Flatpak" }})",
+            when {
+                deb != null && fpInstalled -> "Installed with Flatpak · runs on the Linux Display"
+                deb != null && !archOk -> "Only available for ${a.arches.joinToString()} – your phone is $devArch"
+                deb != null -> "Flatpak from Flathub · installs into DroidSystem (${a.arches.joinToString().ifEmpty { "all" }})"
+                else -> "Desktop Linux app – turn on the Linux system (DroidSystem 2) in System Settings to install it"
+            },
             Modifier.padding(top = 6.dp), color = c.inactiveText, fontSize = 12.sp,
         )
         if (d == null) {
@@ -808,9 +839,9 @@ private fun FlathubDetail(state: KdxState, ds: DroidSystem, s: BazaarSession, fh
         title = { Text("Install ${a.name}?") },
         text = {
             Text(
-                "${a.name} is a desktop Linux app from Flathub. Android doesn't let apps run desktop Linux programs, so it " +
-                    "can't run on this phone, even inside DroidSystem.\n\nYou can save its .flatpakref to install it on a Linux PC " +
-                    "(flatpak install ${a.id}.flatpakref), or look for an Android version.",
+                "${a.name} is a desktop Linux app from Flathub. To run it on this phone, turn on the Linux system in " +
+                    "System Settings: DroidSystem 2 is based on Debian and runs Flatpak apps on its Linux Display.\n\n" +
+                    "You can also save its .flatpakref for a Linux PC, or look for an Android version.",
             )
         },
         confirmButton = {

@@ -10,6 +10,9 @@ object DroidShell {
     val help = listOf(
         "DroidSystem commands:",
         "  bazaar                        open the Bazaar app store",
+        "  gui <command>                 run a Linux app with windows on the Linux Display",
+        "  linux-display                 open the Linux Display window",
+        "  apt / flatpak                 real Debian apt and Flatpak (DroidSystem 2)",
         "  dsfetch                       system information",
         "  dspkg update|upgrade|list|search|show|install|remove|build",
         "        install accepts names, .deb, .rpm, .pkg.tar.{gz,xz} and .dsp files",
@@ -76,6 +79,18 @@ object DroidShell {
         if (argv.isEmpty()) return false
         val args = argv.drop(1)
         // `builtin … | shell pipeline`: capture the builtin's output and feed it to the rest.
+        val deb = state.debian
+        // DroidSystem 2: Debian handles apt itself, and real Flatpak (once set up) handles flatpak
+        val debFlatpak = deb != null && deb.hasCommand("usr/bin/flatpak")
+        if (deb != null && argv[0] in setOf("apt", "apt-get")) return false
+        if (debFlatpak && argv[0] == "flatpak") {
+            if (args.firstOrNull() == "run") {
+                val id = args.drop(1).firstOrNull { !it.startsWith("-") } ?: return usage(s, "flatpak run APP-ID")
+                if (state.flatpakRunner?.appDir(id) != null) { s.println("Starting $id on the Linux Display…", 2); state.launchFlatpak(id); return true }
+                if (ds.flatpakEntry(id) == null) { s.println("error: $id is not installed", 2); return true }
+                // otherwise: a DroidHub app – fall through to the classic runner
+            } else return false
+        }
         val pipe = pipeIndex(line)
         if (argv[0] in builtins && pipe > 0) {
             val captured = mutableListOf<String>()
@@ -85,6 +100,13 @@ object DroidShell {
             return true
         }
         when (argv[0]) {
+            "gui", "xapp" -> {
+                if (deb == null) return err(s, "gui: needs DroidSystem 2 (Debian)")
+                if (args.isEmpty()) return usage(s, "gui <command> [args]   e.g. gui xeyes")
+                s.println("Starting ${args.first()} on the Linux Display…", 2)
+                state.launchLinuxGui(line.substringAfter(argv[0]).trim())
+            }
+            "linux-display" -> state.open(org.kdx.shell.core.KApp.LINUXDISPLAY)
             "bazaar" -> state.open(org.kdx.shell.core.KApp.BAZAAR)
             "kdx-app" -> runCatching { state.open(org.kdx.shell.core.KApp.valueOf(args.first().uppercase())) }
                 .onFailure { s.println("kdx-app: unknown app ${args.firstOrNull() ?: ""}", 2) }
@@ -95,7 +117,11 @@ object DroidShell {
             }
             "dspkg", "apt", "apt-get" -> dspkg(s, state, ds, argv[0], args)
             "flatpak" -> if (!state.flatpakEnabled) s.println("flatpak: Flatpak support is turned off in System Settings → Linux System", 2)
-                else flatpak(s, state, ds, args)
+                else {
+                    if (deb != null && args.firstOrNull() in setOf("install", "search", "remote-ls") && args.size > 1 && !args.last().startsWith("org.droidsystem."))
+                        s.println("Tip: run flatpak-setup once to use real Flatpak with Flathub. Showing DroidHub (DroidSystem's own apps):", 2)
+                    flatpak(s, state, ds, args)
+                }
             "run-desktop" -> {
                 val f = args.firstOrNull()?.let { file(s, it) } ?: return usage(s, "run-desktop <file.desktop>")
                 val e = DroidSystem.parseDesktop(f) ?: return err(s, "run-desktop: not a launchable .desktop file")
@@ -158,12 +184,16 @@ object DroidShell {
         val info = listOf(
             "user@droidsystem",
             "----------------",
-            "OS: ${ds.version}",
+            "OS: ${state.debian?.let { d -> runCatching { java.io.File(d.root, "etc/os-release").readLines().first { it.startsWith("PRETTY_NAME=") }.substringAfter('=').trim('"') }.getOrNull() } ?: ds.version}",
             "Host: ${Build.MANUFACTURER} ${Build.MODEL}",
             "Kernel: ${System.getProperty("os.version")}",
             "Base: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
-            "Packages: ${ds.installed().size} (dspkg), ${ds.flatpakInstalled().size} (flatpak)",
-            "Shell: konsole + sh",
+            "Packages: " + listOfNotNull(
+                state.debian?.let { d -> runCatching { java.io.File(d.root, "var/lib/dpkg/status").readLines().count { it == "Status: install ok installed" } }.getOrNull()?.let { "$it (dpkg)" } },
+                "${ds.installed().size} (dspkg)",
+                "${ds.flatpakInstalled().size + (state.flatpakRunner?.installed()?.size ?: 0)} (flatpak)",
+            ).joinToString(", "),
+            "Shell: ${if (state.debian != null) "bash (Debian, via proot)" else "konsole + sh"}",
             "DE: KDX (Plasma-style)",
             "Theme: ${state.themeMode.label}",
             "CPU: ${Runtime.getRuntime().availableProcessors()} × ${Build.SUPPORTED_ABIS.firstOrNull()}",

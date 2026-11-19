@@ -47,10 +47,12 @@ enum class KApp(
     SETTINGS("System Settings", "Configure KDX", Icons.Filled.Settings, "Settings", "preferences theme wallpaper appearance desktops"),
     /** DroidSystem's app store; listed through its .desktop entry, so only visible once DroidSystem is installed. */
     BAZAAR("Bazaar", "App Store", Icons.Filled.Storefront, "System", "store flatpak packages install apps software"),
+    /** Shows the X display that DroidSystem's Linux apps (apt and Flatpak) draw on. */
+    LINUXDISPLAY("Linux Display", "Linux Desktop Apps", Icons.Filled.DesktopWindows, "System", "x11 vnc linux gui display flatpak"),
     ;
 
     /** Apps that belong to DroidSystem rather than KDX itself. */
-    val droidOnly get() = this == BAZAAR
+    val droidOnly get() = this == BAZAAR || this == LINUXDISPLAY
 
     val key get() = "kdx:$name"
 }
@@ -138,13 +140,116 @@ class KdxState(app: Application) : AndroidViewModel(app) {
                 Triple(d, d?.desktopEntries(flatpakEnabled) ?: emptyList(), m)
             }
             droid = ds
-            linuxApps = apps
+            val deb = ds?.let { debianFor(it) }?.takeIf { withContext(Dispatchers.IO) { it.isInstalled } }
+            attachDebian(deb)
+            linuxApps = apps + (deb?.let { withContext(Dispatchers.IO) { org.kdx.shell.droid.AndroidLinux.desktopEntries(it, flatpakEnabled) } } ?: emptyList())
             if (migrated) toast("DroidSystem upgraded to ${DroidSystem.SYSTEM_VERSION} – Bazaar is now installed")
         }
     }
 
     fun disableDroid() {
         droidEnabled = false; save(); reloadDroid()
+    }
+
+    // ---- DroidSystem 2: the Debian base, Linux display and Flatpak ----
+    /** The Debian system under DroidSystem, once installed (null while disabled / not installed). */
+    var debian by mutableStateOf<org.kdx.shell.droid.DebianSystem?>(null)
+        private set
+    var debianProgress by mutableStateOf<Pair<Float, String>?>(null)
+        private set
+    var debianError by mutableStateOf<String?>(null)
+    val debianLog = mutableStateListOf<String>()
+    var linuxDisplay: org.kdx.shell.droid.LinuxDisplay? = null
+        private set
+    var flatpakRunner: org.kdx.shell.droid.FlatpakRunner? = null
+        private set
+    /** Bumped when Debian packages / Flatpaks change, so Bazaar and Kickoff re-check. */
+    var debianVersion by mutableIntStateOf(0)
+
+    private fun debianFor(classic: DroidSystem?): org.kdx.shell.droid.DebianSystem =
+        org.kdx.shell.droid.AndroidLinux.debian(ctx, classic?.home)
+
+    private fun attachDebian(d: org.kdx.shell.droid.DebianSystem?) {
+        debian = d
+        if (d != null) {
+            if (linuxDisplay?.sys?.root != d.root) {
+                linuxDisplay?.stop()
+                linuxDisplay = org.kdx.shell.droid.LinuxDisplay(d)
+                flatpakRunner = org.kdx.shell.droid.FlatpakRunner(d, linuxDisplay!!)
+            }
+        } else { linuxDisplay?.stop(); linuxDisplay = null; flatpakRunner = null }
+    }
+
+    /** Enabling DroidSystem also builds the Debian base (tests switch this off to stay offline). */
+    var autoInstallDebian = true
+
+    /** Downloads Debian and builds DroidSystem 2 on top of it (debootstrap-style, see DebianSystem.bootstrap). */
+    fun installDebian() {
+        if (debianProgress != null) return
+        val sys = debianFor(droid)
+        debianError = null
+        debianLog.clear()
+        debianProgress = 0f to "Starting"
+        viewModelScope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    sys.bootstrap(
+                        org.kdx.shell.droid.DebianRepo(arch = sys.arch), File(ctx.cacheDir, "debian"),
+                        progress = { p, m -> viewModelScope.launch { debianProgress = p to m } },
+                        log = { line -> viewModelScope.launch { debianLog += line; while (debianLog.size > 300) debianLog.removeAt(0) } },
+                    )
+                }
+            }
+            debianProgress = null
+            r.onSuccess { attachDebian(sys); refreshLinuxApps(); toast("DroidSystem 2 (Debian) is ready") }
+                .onFailure { debianError = it.message ?: it.toString() }
+        }
+    }
+
+    fun uninstallDebian() {
+        val d = debian ?: debianFor(droid)
+        attachDebian(null)
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { d.root.deleteRecursively() }
+            refreshLinuxApps(); toast("Debian base removed")
+        }
+    }
+
+    /** Starts the X display (if needed) and opens the Linux Display window. Call from any thread. */
+    private suspend fun ensureDisplay(): org.kdx.shell.droid.LinuxDisplay? {
+        val disp = linuxDisplay ?: return null
+        if (!disp.isSetUp) {
+            withContext(Dispatchers.Main) {
+                toast("Setting up the display server for Linux apps first…")
+                open(KApp.KONSOLE, "display-setup")
+            }
+            return null
+        }
+        val dm = ctx.resources.displayMetrics
+        // A desktop-sized screen: Linux apps expect at least ~1280x720
+        val (w, h) = if (dm.widthPixels > dm.heightPixels) 1600 to 900 else 1280 to 800
+        withContext(Dispatchers.IO) { disp.start(maxOf(w, 1024), maxOf(h, 600)) }
+        withContext(Dispatchers.Main) { open(KApp.LINUXDISPLAY) }
+        return disp
+    }
+
+    /** Runs a Debian GUI command (from a .desktop file or Konsole) on the Linux display. */
+    fun launchLinuxGui(cmd: String) {
+        viewModelScope.launch {
+            runCatching { ensureDisplay()?.let { d -> withContext(Dispatchers.IO) { d.launch(cmd) } } }
+                .onFailure { toast("Couldn't start: ${it.message}") }
+        }
+    }
+
+    /** Runs an installed Flatpak app on the Linux display. */
+    fun launchFlatpak(id: String) {
+        viewModelScope.launch {
+            runCatching {
+                val runner = flatpakRunner ?: error("Enable DroidSystem first")
+                if (runner.appDir(id) == null) error("$id is not installed")
+                ensureDisplay()?.let { withContext(Dispatchers.IO) { runner.launch(id) } }
+            }.onFailure { toast("Couldn't start $id: ${it.message}") }
+        }
     }
 
     /** Where a new DroidSystem goes: the phone's storage when KDX has file access, else KDX's private folder. */
@@ -154,7 +259,11 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     fun enableDroid() {
         if (droidProgress != null) return
         val existing = droidRoot?.let { DroidSystem(ctx, File(it)) }?.takeIf { it.isInstalled }
-        if (existing != null) { droidEnabled = true; save(); reloadDroid(); return }
+        if (existing != null) {
+            droidEnabled = true; save(); reloadDroid()
+            viewModelScope.launch { if (autoInstallDebian && !withContext(Dispatchers.IO) { debianFor(existing).isInstalled }) installDebian() }
+            return
+        }
         installDroid(droidTargetDir())
     }
 
@@ -169,6 +278,8 @@ class KdxState(app: Application) : AndroidViewModel(app) {
             r.onSuccess {
                 droidRoot = dir.path; droidEnabled = true; save()
                 droid = ds; linuxApps = withContext(Dispatchers.IO) { ds.desktopEntries(flatpakEnabled) }
+                // DroidSystem 2 is Debian-based: build the Debian base next
+                if (!withContext(Dispatchers.IO) { debianFor(ds).isInstalled }) { if (autoInstallDebian) installDebian() } else reloadDroid()
                 toast("DroidSystem installed in ${dir.path}")
             }.onFailure { toast("DroidSystem install failed: ${it.message}") }
         }
@@ -185,7 +296,11 @@ class KdxState(app: Application) : AndroidViewModel(app) {
 
     fun refreshLinuxApps() {
         viewModelScope.launch {
-            linuxApps = withContext(Dispatchers.IO) { droid?.desktopEntries(flatpakEnabled) ?: emptyList() }
+            linuxApps = withContext(Dispatchers.IO) {
+                (droid?.desktopEntries(flatpakEnabled) ?: emptyList()) +
+                    (debian?.let { org.kdx.shell.droid.AndroidLinux.desktopEntries(it, flatpakEnabled) } ?: emptyList())
+            }
+            debianVersion++
         }
     }
 
@@ -271,7 +386,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         closeMenus()
         // Single-instance apps are focused instead of duplicated.
         if (app.droidOnly && droid == null) { toast("Enable the Linux system (DroidSystem) in System Settings to use ${app.title}"); return }
-        if (app in setOf(KApp.SETTINGS, KApp.KLIPPER, KApp.SYSMON, KApp.INFOCENTER, KApp.KNOTES, KApp.BAZAAR)) {
+        if (app in setOf(KApp.SETTINGS, KApp.KLIPPER, KApp.SYSMON, KApp.INFOCENTER, KApp.KNOTES, KApp.BAZAAR, KApp.LINUXDISPLAY)) {
             windows.firstOrNull { it.app == app }?.let {
                 it.desktop = currentDesktop
                 focus(it)
@@ -408,9 +523,10 @@ class KdxState(app: Application) : AndroidViewModel(app) {
 
     // ---- storage helpers ----
     fun hasStorageAccess(): Boolean = runCatching {
-        // Can throw when no external storage volume is mounted.
-        if (android.os.Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager()
-        else ctx.checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        // KDX targets Android 9, so the classic storage permission grants access; "all files access" works too.
+        // (isExternalStorageManager can throw when no external storage volume is mounted.)
+        ctx.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED ||
+            (android.os.Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager())
     }.getOrDefault(false)
 
     fun homeDir(): File =

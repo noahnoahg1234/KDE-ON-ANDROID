@@ -360,9 +360,9 @@ private fun LinuxSystemSection(state: KdxState) {
     }
     Section("Linux System (DroidSystem)", Icons.Filled.Terminal) {
         Text(
-            "DroidSystem is KDX's own Linux-style system. It is bundled inside KDX and installed into a folder on " +
-                "your phone, with nothing downloaded. It adds a Linux file system, the dspkg package manager (apt-compatible), " +
-                "Flatpak support and Linux file types in Dolphin.",
+            "DroidSystem 2 is KDX's Linux system, based on Debian. Turning it on builds Debian from official packages " +
+                "(about 35 MB download) and runs it with proot, so real Linux software works: apt, Linux apps with windows " +
+                "on the Linux Display, and Flatpak apps from Flathub. DroidSystem's own tools, Bazaar and dspkg are layered on top.",
             color = c.inactiveText, fontSize = 13.sp,
         )
         Spacer(Modifier.height(6.dp))
@@ -387,6 +387,7 @@ private fun LinuxSystemSection(state: KdxState) {
             stats?.let { (size, pkgs, fps) ->
                 KV("Size", humanSize(size)); KV("Packages", "$pkgs (dspkg)"); KV("Flatpak apps", "$fps")
             }
+            DebianBlock(state)
             Toggle("Flatpak support", state.flatpakEnabled) { state.flatpakEnabled = it; state.save(); state.refreshLinuxApps() }
             Toggle("Open Linux file types in Dolphin (.deb .dsp .desktop .sh .flatpakref .tar.*)", state.linuxFileTypes) {
                 state.linuxFileTypes = it; state.save()
@@ -408,4 +409,41 @@ private fun LinuxSystemSection(state: KdxState) {
         confirmButton = { TextButton({ confirmUninstall = false; state.uninstallDroid() }) { Text("Uninstall", color = c.negative) } },
         dismissButton = { TextButton({ confirmUninstall = false }) { Text("Cancel") } },
     )
+}
+
+/** DroidSystem 2: Debian base status and setup actions. */
+@Composable
+private fun DebianBlock(state: KdxState) {
+    val c = LocalBreeze.current
+    val deb = state.debian
+    val prog = state.debianProgress
+    Spacer(Modifier.height(6.dp))
+    Text("Debian base", color = c.text, fontWeight = FontWeight.SemiBold)
+    when {
+        prog != null -> {
+            Text("Building DroidSystem 2: ${prog.second}", color = c.text, fontSize = 13.sp)
+            LinearProgressIndicator(progress = { prog.first }, Modifier.fillMaxWidth().padding(vertical = 6.dp))
+            state.debianLog.lastOrNull()?.let { Text(it, color = c.inactiveText, fontSize = 11.sp, maxLines = 1) }
+            Text("Keep KDX open; configuring packages takes a few minutes on a phone.", color = c.inactiveText, fontSize = 12.sp)
+        }
+        deb != null -> {
+            KV("Status", "Installed (Debian trixie, ${deb.arch})")
+            KV("Linux apps", if (deb.hasCommand("usr/bin/Xvnc")) "Display server ready" else "Not set up")
+            KV("Flatpak", if (deb.hasCommand("usr/bin/flatpak")) "Ready (Flathub)" else "Not set up")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!deb.hasCommand("usr/bin/Xvnc")) OutlinedButton({ state.open(org.kdx.shell.core.KApp.KONSOLE, "display-setup") }, Modifier.weight(1f)) { Text("Set up Linux apps") }
+                else OutlinedButton({ state.open(org.kdx.shell.core.KApp.LINUXDISPLAY) }, Modifier.weight(1f)) { Text("Linux Display") }
+                if (!deb.hasCommand("usr/bin/flatpak")) OutlinedButton({ state.open(org.kdx.shell.core.KApp.KONSOLE, "flatpak-setup") }, Modifier.weight(1f)) { Text("Set up Flatpak") }
+                else OutlinedButton({ state.open(org.kdx.shell.core.KApp.BAZAAR) }, Modifier.weight(1f)) { Text("Get apps") }
+            }
+            TextButton({ state.uninstallDebian() }) { Text("Remove Debian base", color = c.negative) }
+        }
+        else -> {
+            state.debianError?.let { e ->
+                Text("Setup failed: $e", color = c.negative, fontSize = 13.sp, maxLines = 6)
+                state.debianLog.takeLast(4).forEach { Text(it, color = c.inactiveText, fontSize = 11.sp, maxLines = 1) }
+            } ?: Text("Not installed yet.", color = c.inactiveText, fontSize = 13.sp)
+            Button({ state.installDebian() }) { Text(if (state.debianError != null) "Retry" else "Install Debian base") }
+        }
+    }
 }

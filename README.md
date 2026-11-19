@@ -37,10 +37,35 @@ It runs as a **home-screen launcher**, so it can fully replace your Android home
 | **Info Center** | Software, hardware and display information |
 | **System Settings** | Wallpaper, colours, desktops, panel, widgets, clock, shortcuts, Android integration |
 
-## Linux system: DroidSystem
-Turn it on in **System Settings → Linux System (DroidSystem)**. KDX installs **DroidSystem**, its own Linux-style
-system, into a `DroidSystem/` folder on your phone (or KDX's private folder if file access hasn't been granted).
-DroidSystem is written for KDX and bundled inside the APK (`app/src/main/assets/droidsystem`), so **nothing is downloaded**.
+## Linux system: DroidSystem 2 (Debian-based)
+Turn it on in **System Settings → Linux System (DroidSystem)**. DroidSystem 2 is **based on Debian** and runs real
+Linux software:
+
+- **Real Debian** – KDX builds it like `debootstrap` does: it downloads the official Debian trixie packages for your
+  phone's CPU (arm64, armhf or amd64; about 35 MB, SHA-256 verified) and installs them, then adds the DroidSystem layer
+  (branding, apt settings for proot, tools). It runs with **proot** (bundled, from Termux), so no root is needed.
+- **apt works** in Konsole (`apt install cowsay`, `apt install gnome-mines`, …) – Konsole is a real Debian `bash`.
+- **Linux apps with windows** open on the **Linux Display**: a TigerVNC X server with the Openbox window manager inside
+  DroidSystem, shown in a KDX window. Tap = click, long-press = right-click, drag = drag, two fingers = scroll / pinch
+  zoom; a keyboard button and Ctrl/Alt/Super/Esc/arrow keys are in the toolbar. Set it up with `display-setup`
+  (or the button in Settings), then run apps from Kickoff → Linux or with `gui <app>` in Konsole.
+- **Flatpak** – `flatpak-setup` installs the real Flatpak and adds Flathub. Installing from **Bazaar** runs
+  `flatpak install` for you, and **Open** starts the app on the Linux Display. Flatpak's own sandbox (bubblewrap) needs
+  kernel features Android doesn't give apps, so KDX starts Flatpak apps itself in the same layout (runtime as `/usr`,
+  app as `/app`, Flatpak's environment) using proot.
+- Installed Debian and Flatpak apps appear in **Kickoff → Applications → Linux** with their own icons.
+
+To run downloaded programs KDX must target **Android 9** (like Termux), so it's installed by sideloading rather than
+from Google Play. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the bundled proot binaries.
+
+**What's tested:** the Debian bootstrap, apt, the X display + VNC client and the Flatpak launcher are exercised by
+`DebianIntegrationTest` (`./gradlew testDebugUnitTest -Pkdx.integration=/tmp/kdx-it`) on x86_64 Linux. Running
+`flatpak install` itself needs a proot that handles modern system calls such as `statx` – Termux's proot (the one
+bundled for phones) does; older distribution proot builds don't.
+
+### DroidSystem's own layer
+DroidSystem also keeps its original, fully offline layer in a `DroidSystem/` folder on your phone (mounted at
+`/home/user` inside Debian), bundled inside the APK (`app/src/main/assets/droidsystem`):
 
 | Settings | Bazaar | Flathub app | DroidSystem app |
 |---|---|---|---|
