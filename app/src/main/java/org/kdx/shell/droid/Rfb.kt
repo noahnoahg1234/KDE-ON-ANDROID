@@ -62,10 +62,16 @@ class RfbClient(private val host: String = "127.0.0.1", private val port: Int) {
         out.writeByte(32); out.writeByte(24); out.writeByte(0); out.writeByte(1)
         out.writeShort(255); out.writeShort(255); out.writeShort(255)
         out.writeByte(16); out.writeByte(8); out.writeByte(0); out.write(ByteArray(3))
-        val encodings = intArrayOf(1 /* CopyRect */, 0 /* Raw */, -223 /* DesktopSize */)
+        // Cursor (-239): the server sends the pointer shape separately instead of drawing it into the picture –
+        // we never draw it, which hides the mouse pointer (touch screens don't need one).
+        // ExtendedDesktopSize (-308): lets us resize the X screen to fit the KDX window.
+        val encodings = intArrayOf(1 /* CopyRect */, 0 /* Raw */, -223 /* DesktopSize */, -308 /* ExtendedDesktopSize */, -239 /* Cursor */)
         out.writeByte(2); out.writeByte(0); out.writeShort(encodings.size); encodings.forEach { out.writeInt(it) }
         requestUpdate(false)
         running = true
+        // TigerVNC draws the pointer into the picture while it sits where the viewer didn't put it; claiming the
+        // pointer position up front means only the (discarded) cursor shape is sent, so no pointer is visible.
+        pointer(width - 1, height - 1, 0)
     }
 
     private fun reason(): String = runCatching { ByteArray(input.readInt()).also { input.readFully(it) }.toString(Charsets.UTF_8) }.getOrDefault("")
@@ -88,6 +94,29 @@ class RfbClient(private val host: String = "127.0.0.1", private val port: Int) {
                 }
             }
         } finally { close() }
+    }
+
+    /** True once the server said it supports client-requested resizing. */
+    @Volatile var canResize = false; private set
+    private var screenId = 0
+
+    private fun resizeTo(w: Int, h: Int) {
+        width = w; height = h; pixels = IntArray(w * h); onResize(w, h)
+        // X clamps the pointer into the new screen; re-claim its position so it isn't drawn
+        pointer(minOf(lastX, w - 1), minOf(lastY, h - 1), 0)
+    }
+    @Volatile private var lastX = 0
+    @Volatile private var lastY = 0
+
+    /** Asks the X server to change its screen size (TigerVNC resizes via RandR). */
+    fun setDesktopSize(w: Int, h: Int) {
+        if (!canResize || (w == width && h == height)) return
+        send {
+            out.writeByte(251); out.writeByte(0)
+            out.writeShort(w); out.writeShort(h)
+            out.writeByte(1); out.writeByte(0)
+            out.writeInt(screenId); out.writeShort(0); out.writeShort(0); out.writeShort(w); out.writeShort(h); out.writeInt(0)
+        }
     }
 
     private fun readUpdate() {
@@ -118,7 +147,16 @@ class RfbClient(private val host: String = "127.0.0.1", private val port: Int) {
                     for (j in 0 until h) System.arraycopy(tmp, j * w, pixels, (y + j) * width + x, w)
                 }
                 -223 -> { // DesktopSize
-                    width = w; height = h; pixels = IntArray(w * h); onResize(w, h)
+                    resizeTo(w, h)
+                }
+                -308 -> { // ExtendedDesktopSize: x = reason, y = status; then the screen layout
+                    val screens = input.readUnsignedByte(); input.skipBytes(3)
+                    repeat(screens) { val id = input.readInt(); input.skipBytes(12); screenId = id }
+                    canResize = true
+                    if (y == 0 && (w != width || h != height)) resizeTo(w, h)
+                }
+                -239 -> { // Cursor shape: read and discard, so no pointer is ever shown
+                    input.skipBytes(w * h * 4 + (w + 7) / 8 * h)
                 }
                 else -> throw IOException("Unsupported encoding $enc")
             }
@@ -132,8 +170,9 @@ class RfbClient(private val host: String = "127.0.0.1", private val port: Int) {
 
     /** buttons: bit0 left, bit1 middle, bit2 right, bit3/4 wheel up/down. */
     fun pointer(x: Int, y: Int, buttons: Int) = send {
+        lastX = x.coerceIn(0, maxOf(0, width - 1)); lastY = y.coerceIn(0, maxOf(0, height - 1))
         out.writeByte(5); out.writeByte(buttons)
-        out.writeShort(x.coerceIn(0, maxOf(0, width - 1))); out.writeShort(y.coerceIn(0, maxOf(0, height - 1)))
+        out.writeShort(lastX); out.writeShort(lastY)
     }
 
     fun key(keysym: Int, down: Boolean) = send {

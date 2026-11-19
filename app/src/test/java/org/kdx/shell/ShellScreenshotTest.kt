@@ -173,6 +173,25 @@ class ShellScreenshotTest {
         }
     }
 
+    @Test fun linuxAppWindowUsesAppTitleAndIcon() {
+        // a stand-in app icon (orange circle)
+        val icon = java.io.File(rule.activity.cacheDir, "org.example.Paint.png")
+        val bmp = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(bmp).drawCircle(32f, 32f, 30f, android.graphics.Paint().apply { color = 0xFFF67400.toInt(); isAntiAlias = true })
+        icon.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        rule.runOnUiThread {
+            state.open(KApp.KCALC)
+            val w = org.kdx.shell.core.KWindow(900, KApp.LINUXDISPLAY, "app:62", 0, maximized = true)
+            w.title = "Untitled — Paint"; w.iconFile = icon
+            state.windows.add(w); state.activeId = w.id
+        }
+        rule.mainClock.advanceTimeBy(500)
+        Thread.sleep(300)
+        rule.mainClock.advanceTimeBy(500)
+        shot("60-linux-app-window")
+        rule.onAllNodes(androidx.compose.ui.test.hasText("Untitled — Paint")).onFirst().assertExists()
+    }
+
     @Test fun konsoleRunsCommands() {
         rule.runOnUiThread { state.open(KApp.KONSOLE, "help") }
         shot("30-konsole-help")

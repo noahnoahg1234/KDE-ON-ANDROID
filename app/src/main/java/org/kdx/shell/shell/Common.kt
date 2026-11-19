@@ -81,7 +81,7 @@ fun KdxState.launch(l: Launchable) = when (l) {
     is Launchable.Linux -> when {
         l.entry.kdxApp != null -> open(l.entry.kdxApp!!)
         l.entry.source == org.kdx.shell.droid.DroidSystem.EntrySource.FLATHUB && l.entry.flatpakId != null -> launchFlatpak(l.entry.flatpakId)
-        l.entry.source == org.kdx.shell.droid.DroidSystem.EntrySource.DEBIAN && !l.entry.terminal -> launchLinuxGui(l.entry.exec)
+        l.entry.source == org.kdx.shell.droid.DroidSystem.EntrySource.DEBIAN && !l.entry.terminal -> launchLinuxGui(l.entry.exec, l.entry.name, l.entry.icon)
         else -> open(KApp.KONSOLE, l.entry.exec)
     }
 }
@@ -282,4 +282,17 @@ fun TextInputDialog(
         confirmButton = { TextButton(onClick = { onConfirm(text) }) { Text(confirm) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+/** The icon for a window: the app's own icon when it has one (Linux apps), else the KDX app icon. */
+@Composable
+fun WindowIcon(w: org.kdx.shell.core.KWindow, size: Dp) {
+    val f = w.iconFile
+    if (f == null) { KAppIcon(w.app, size); return }
+    val bmp by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, f) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { android.graphics.BitmapFactory.decodeFile(f.path)?.asImageBitmap() }.getOrNull()
+        }
+    }
+    bmp?.let { Image(it, w.title, Modifier.size(size)) } ?: KAppIcon(w.app, size)
 }

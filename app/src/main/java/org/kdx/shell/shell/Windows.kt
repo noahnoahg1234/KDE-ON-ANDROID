@@ -122,7 +122,7 @@ private fun TitleBar(state: KdxState, w: KWindow, active: Boolean, areaW: Float,
     ) {
         Box {
             Box(Modifier.clip(RoundedCornerShape(4.dp)).clickable { menu = true }.padding(4.dp)) {
-                KAppIcon(w.app, 20.dp)
+                WindowIcon(w, 20.dp)
             }
             WindowMenu(state, w, menu) { menu = false }
         }
@@ -197,7 +197,7 @@ fun Overview(state: KdxState) {
                 ) {
                     Text("Desktop ${d + 1}", color = Color.White, fontSize = 13.sp)
                     Row(Modifier.height(22.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                        state.windowsOnDesktop(d).take(5).forEach { KAppIcon(it.app, 18.dp) }
+                        state.windowsOnDesktop(d).take(5).forEach { WindowIcon(it, 18.dp) }
                     }
                 }
             }
@@ -224,12 +224,12 @@ fun Overview(state: KdxState) {
                             .combinedClickable(onClick = { state.overviewOpen = false; state.focus(w) }, onLongClick = { menu = true })
                     ) {
                         Row(Modifier.fillMaxWidth().background(c.header).padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            KAppIcon(w.app, 18.dp)
+                            WindowIcon(w, 18.dp)
                             Text(w.title, Modifier.weight(1f).padding(horizontal = 6.dp), color = c.text, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Icon(Icons.Filled.Close, "Close", tint = c.negative, modifier = Modifier.size(18.dp).clickable { state.close(w) })
                         }
                         Box(Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
-                            KAppIcon(w.app, 48.dp)
+                            WindowIcon(w, 48.dp)
                             if (w.minimized) Text("minimized", Modifier.align(Alignment.BottomCenter).padding(4.dp), color = c.inactiveText, fontSize = 11.sp)
                         }
                     }

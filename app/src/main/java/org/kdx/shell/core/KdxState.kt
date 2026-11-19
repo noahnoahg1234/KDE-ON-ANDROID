@@ -69,6 +69,8 @@ class KWindow(val id: Int, val app: KApp, arg: String?, desktop: Int, maximized:
     var minimized by mutableStateOf(false)
     var maximized by mutableStateOf(maximized)
     var keepAbove by mutableStateOf(false)
+    /** A window can show its own app's icon (e.g. a Linux app on the Linux Display) instead of the KDX app icon. */
+    var iconFile by mutableStateOf<File?>(null)
     var placed = false
 
     /** Per-window state that must survive while the window is minimised or on another desktop. */
@@ -142,7 +144,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
                 Triple(d, d?.desktopEntries(flatpakEnabled) ?: emptyList(), m)
             }
             droid = ds
-            val deb = ds?.let { debianFor(it) }?.takeIf { withContext(Dispatchers.IO) { it.isInstalled } }
+            val deb = ds?.let { debianFor(it) }?.takeIf { withContext(Dispatchers.IO) { it.isInstalled.also { ok -> if (ok) runCatching { it.ensureLayer() } } } }
             attachDebian(deb)
             linuxApps = apps + (deb?.let { withContext(Dispatchers.IO) { org.kdx.shell.droid.AndroidLinux.desktopEntries(it, flatpakEnabled) } } ?: emptyList())
             if (migrated) toast("DroidSystem upgraded to ${DroidSystem.SYSTEM_VERSION} – Bazaar is now installed")
@@ -217,41 +219,64 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Starts the X display (if needed) and opens the Linux Display window. Call from any thread. */
-    private suspend fun ensureDisplay(): org.kdx.shell.droid.LinuxDisplay? {
-        val disp = linuxDisplay ?: return null
-        if (!disp.isSetUp) {
-            withContext(Dispatchers.Main) {
-                toast("Setting up the display server for Linux apps first…")
-                open(KApp.KONSOLE, "display-setup")
-            }
-            return null
-        }
+    // ---- Linux app windows: every Linux/Flatpak app gets its own X display and its own KDX window ----
+    private val appDisplays = java.util.concurrent.ConcurrentHashMap<Int, org.kdx.shell.droid.LinuxDisplay>()
+
+    fun appDisplay(n: Int): org.kdx.shell.droid.LinuxDisplay? = appDisplays[n]
+
+    /** Stops an app window's display (called when its KDX window closes). */
+    fun releaseDisplay(n: Int) {
+        appDisplays.remove(n)?.let { d -> viewModelScope.launch(Dispatchers.IO) { d.stop() } }
+    }
+
+    /**
+     * X screen size for a window [widthDp] x [heightDp]: desktop apps expect ~800px or more, so on phones one
+     * X pixel is a bit smaller than a dp (the window scales the picture to fit).
+     */
+    fun xScale(widthDp: Float): Float = maxOf(1.25f, 820f / widthDp.coerceAtLeast(1f))
+
+    private fun displaySetUp(deb: org.kdx.shell.droid.DebianSystem): Boolean {
+        if (deb.hasCommand("usr/bin/Xvnc")) return true
+        toast("Setting up the display server for Linux apps first…")
+        open(KApp.KONSOLE, "display-setup")
+        return false
+    }
+
+    /** Starts [start] on a new display and opens a KDX window titled [title] with [icon] for it. */
+    private fun openAppWindow(title: String, icon: File?, start: (org.kdx.shell.droid.LinuxDisplay) -> Process) {
+        val deb = debian ?: run { toast("Turn on the Linux system (DroidSystem) in System Settings first"); return }
+        if (!displaySetUp(deb)) return
+        val n = (2..63).first { !appDisplays.containsKey(it) && !File(deb.root, "tmp/.X$it-lock").exists() }
+        val disp = org.kdx.shell.droid.LinuxDisplay(deb, n, appMode = true)
+        appDisplays[n] = disp
         val dm = ctx.resources.displayMetrics
-        // A desktop-sized screen: Linux apps expect at least ~1280x720
-        val (w, h) = if (dm.widthPixels > dm.heightPixels) 1600 to 900 else 1280 to 800
-        withContext(Dispatchers.IO) { disp.start(maxOf(w, 1024), maxOf(h, 600)) }
-        withContext(Dispatchers.Main) { open(KApp.LINUXDISPLAY) }
-        return disp
-    }
-
-    /** Runs a Debian GUI command (from a .desktop file or Konsole) on the Linux display. */
-    fun launchLinuxGui(cmd: String) {
-        viewModelScope.launch {
-            runCatching { ensureDisplay()?.let { d -> withContext(Dispatchers.IO) { d.launch(cmd) } } }
-                .onFailure { toast("Couldn't start: ${it.message}") }
-        }
-    }
-
-    /** Runs an installed Flatpak app on the Linux display. */
-    fun launchFlatpak(id: String) {
+        val wDp = dm.widthPixels / dm.density
+        val hDp = (dm.heightPixels / dm.density - 140f).coerceAtLeast(300f)
+        val f = xScale(wDp)
+        closeMenus()
+        val w = KWindow(nextId++, KApp.LINUXDISPLAY, "app:$n", currentDesktop, maximized = !floatingByDefault)
+        w.title = title; w.iconFile = icon
+        windows.add(w); activeId = w.id
         viewModelScope.launch {
             runCatching {
-                val runner = flatpakRunner ?: error("Enable DroidSystem first")
-                if (runner.appDir(id) == null) error("$id is not installed")
-                ensureDisplay()?.let { withContext(Dispatchers.IO) { runner.launch(id) } }
-            }.onFailure { toast("Couldn't start $id: ${it.message}") }
+                withContext(Dispatchers.IO) {
+                    disp.start((wDp * f).toInt(), (hDp * f).toInt())
+                    disp.appProcess = start(disp)
+                }
+            }.onFailure { e -> toast("Couldn't start $title: ${e.message}"); close(w) }
         }
+    }
+
+    /** Runs a Debian GUI command (from a .desktop file or Konsole's `gui`) in its own window. */
+    fun launchLinuxGui(cmd: String, title: String? = null, icon: File? = null) =
+        openAppWindow(title ?: cmd.substringBefore(' ').substringAfterLast('/'), icon) { d -> d.launch(cmd) }
+
+    /** Runs an installed Flatpak app in its own window, with its name and icon. */
+    fun launchFlatpak(id: String) {
+        val runner = flatpakRunner ?: run { toast("Turn on the Linux system first"); return }
+        val app = runner.installed().firstOrNull { it.id == id } ?: run { toast("$id is not installed"); return }
+        val icon = runner.appDir(id)?.let { org.kdx.shell.droid.AndroidLinux.findIcon(listOf(File(it, "export")), id) }
+        openAppWindow(app.name, icon) { d -> runner.launch(id, on = d) }
     }
 
     /** Where a new DroidSystem goes: the phone's storage when KDX has file access, else KDX's private folder. */
@@ -571,5 +596,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         windows.forEach { it.dispose() }
+        appDisplays.values.forEach { runCatching { it.stop() } }
+        linuxDisplay?.stop()
     }
 }

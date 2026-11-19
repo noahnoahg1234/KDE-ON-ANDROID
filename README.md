@@ -45,14 +45,21 @@ Linux software:
   phone's CPU (arm64, armhf or amd64; about 35 MB, SHA-256 verified) and installs them, then adds the DroidSystem layer
   (branding, apt settings for proot, tools). It runs with **proot** (bundled, from Termux), so no root is needed.
 - **apt works** in Konsole (`apt install cowsay`, `apt install gnome-mines`, …) – Konsole is a real Debian `bash`.
-- **Linux apps with windows** open on the **Linux Display**: a TigerVNC X server with the Openbox window manager inside
-  DroidSystem, shown in a KDX window. Tap = click, long-press = right-click, drag = drag, two fingers = scroll / pinch
-  zoom; a keyboard button and Ctrl/Alt/Super/Esc/arrow keys are in the toolbar. Set it up with `display-setup`
-  (or the button in Settings), then run apps from Kickoff → Linux or with `gui <app>` in Konsole.
+- **Linux apps with windows** each get **their own KDX window** with the app's **title** (live, e.g. the open
+  document) and **icon** in the title bar and panel. Behind each window is its own X display (TigerVNC + Openbox,
+  no extra title bar, app maximized) that **resizes to fit the window**. The **mouse pointer is hidden**, and input
+  works like a **touchscreen**: tap = click, drag = scroll, long-press = right-click, long-press + drag = drag, two
+  fingers = scroll / pinch-zoom (a Mouse mode is one tap away). Keyboard and Ctrl/Alt/Super/Esc/arrow keys are in
+  the toolbar. The window closes when the app quits. Set up with `display-setup` (or the button in Settings), then
+  run apps from Kickoff → Linux, Bazaar, or `gui <app>` in Konsole.
 - **Flatpak** – `flatpak-setup` installs the real Flatpak and adds Flathub. Installing from **Bazaar** runs
   `flatpak install` for you, and **Open** starts the app on the Linux Display. Flatpak's own sandbox (bubblewrap) needs
   kernel features Android doesn't give apps, so KDX starts Flatpak apps itself in the same layout (runtime as `/usr`,
-  app as `/app`, Flatpak's environment) using proot.
+  app as `/app`, Flatpak's environment) using proot. It mounts **runtime and app extensions** (Mesa GL drivers,
+  codecs, themes, plugins) the way Flatpak does, provides a **D-Bus session bus**, forces X11 for Wayland-first and
+  Electron apps, and turns off Chromium/Electron's internal sandbox (it needs kernel namespaces). Not supported:
+  "extra-data" apps that download proprietary files at install time (they need bubblewrap), and apps that require a
+  real GPU (rendering is software-only).
 - Installed Debian and Flatpak apps appear in **Kickoff → Applications → Linux** with their own icons.
 
 To run downloaded programs KDX must target **Android 9** (like Termux), so it's installed by sideloading rather than

@@ -13,7 +13,12 @@ import java.nio.file.attribute.PosixFilePermissions
  * The X display Linux apps draw on: TigerVNC's Xvnc running inside DroidSystem, shown by KDX's
  * Linux Display window through [RfbClient]. A small window manager (openbox) gives apps title bars.
  */
-class LinuxDisplay(val sys: DebianSystem, val display: Int = 1) {
+class LinuxDisplay(
+    val sys: DebianSystem,
+    val display: Int = 1,
+    /** App mode: one app per display, maximized without decorations (the KDX window supplies title bar and icon). */
+    val appMode: Boolean = false,
+) {
     val port get() = 5900 + display
     @Volatile private var server: Process? = null
     @Volatile private var wm: Process? = null
@@ -27,8 +32,37 @@ class LinuxDisplay(val sys: DebianSystem, val display: Int = 1) {
 
     val env get() = mapOf(
         "DISPLAY" to ":$display", "XDG_RUNTIME_DIR" to "/tmp/runtime-root", "NO_AT_BRIDGE" to "1",
-        "GDK_BACKEND" to "x11", "QT_QPA_PLATFORM" to "xcb", "LIBGL_ALWAYS_SOFTWARE" to "1", "GSK_RENDERER" to "cairo",
+        "DBUS_SESSION_BUS_ADDRESS" to "unix:path=/tmp/runtime-root/bus",
+        // X11 everywhere: there is no Wayland compositor
+        "GDK_BACKEND" to "x11", "QT_QPA_PLATFORM" to "xcb", "SDL_VIDEODRIVER" to "x11", "CLUTTER_BACKEND" to "x11",
+        "ELECTRON_OZONE_PLATFORM_HINT" to "x11", "MOZ_ENABLE_WAYLAND" to "0",
+        // software rendering (llvmpipe); GTK4 draws with cairo
+        "LIBGL_ALWAYS_SOFTWARE" to "1", "GSK_RENDERER" to "cairo",
+        // touch-friendly toolkits
+        "GDK_SCALE" to "1", "QT_AUTO_SCREEN_SCALE_FACTOR" to "0",
     )
+
+    /** One D-Bus session bus shared by all displays (many GTK/Qt/Flatpak apps need it). */
+    private fun ensureSessionBus() {
+        if (!sys.hasCommand("usr/bin/dbus-daemon")) return
+        if (File(sys.root, "tmp/runtime-root/bus").exists() && busProcess?.isAlive == true) return
+        synchronized(LinuxDisplay::class.java) {
+            if (sharedBus?.isAlive == true) { busProcess = sharedBus; return }
+            File(sys.root, "tmp/runtime-root/bus").delete()
+            sys.run("[ -s /etc/machine-id ] || dbus-uuidgen --ensure=/etc/machine-id; mkdir -p /var/lib/dbus; ln -sf /etc/machine-id /var/lib/dbus/machine-id")
+            sharedBus = sys.command(listOf("dbus-daemon", "--session", "--nofork", "--nopidfile", "--address=unix:path=/tmp/runtime-root/bus"))
+                .start().also { drain(it, "dbus") }
+            busProcess = sharedBus
+        }
+    }
+    @Volatile private var busProcess: Process? = null
+
+    /** The active window's title (what KDX shows in its title bar), or null if unknown. */
+    fun windowTitle(): String? {
+        if (!sys.hasCommand("usr/bin/xdotool")) return null
+        val (rc, out) = runCatching { sys.query("DISPLAY=:$display xdotool getactivewindow getwindowname 2>/dev/null || DISPLAY=:$display xdotool search --onlyvisible --name . getwindowname 2>/dev/null | head -n1") }.getOrNull() ?: return null
+        return out.trim().lines().lastOrNull()?.takeIf { rc == 0 && it.isNotBlank() }
+    }
 
     @Synchronized
     fun start(width: Int, height: Int) {
@@ -41,9 +75,10 @@ class LinuxDisplay(val sys: DebianSystem, val display: Int = 1) {
         File(x11, "X$display").delete(); File(sys.root, "tmp/.X$display-lock").delete()
         File(sys.root, "tmp/runtime-root").mkdirs()
         val w = (width / 8 * 8).coerceIn(640, 3840); val h = height.coerceIn(400, 2160)
+        ensureSessionBus()
         server = sys.command(
             listOf("Xvnc", ":$display", "-geometry", "${w}x$h", "-depth", "24", "-SecurityTypes", "None",
-                "-localhost", "-rfbport", "$port", "-AlwaysShared", "-ac", "-nolisten", "tcp"),
+                "-localhost", "-rfbport", "$port", "-AlwaysShared", "-ac", "-nolisten", "tcp", "-AcceptSetDesktopSize"),
         ).start().also { drain(it, "Xvnc") }
         val deadline = System.currentTimeMillis() + 20_000
         while (!portOpen()) {
@@ -51,16 +86,28 @@ class LinuxDisplay(val sys: DebianSystem, val display: Int = 1) {
             if (System.currentTimeMillis() > deadline) throw IOException("Display server didn't start in time")
             Thread.sleep(150)
         }
-        if (sys.hasCommand("usr/bin/openbox")) wm = launch("openbox")
+        if (sys.hasCommand("usr/bin/openbox")) {
+            val cfg = File(sys.root, APP_RC)
+            wm = if (appMode && cfg.isFile) launch("openbox --config-file /$APP_RC") else launch("openbox")
+        }
     }
+
+    /** True while any program other than the X server and window manager runs on this display. */
+    @Volatile var appProcess: Process? = null
 
     /** Starts a GUI program on this display. */
     fun launch(cmd: String, extraEnv: Map<String, String> = emptyMap()): Process =
         sys.command(listOf("/bin/bash", "-lc", "exec $cmd"), "/root", env + extraEnv).start().also { it.outputStream.close(); drain(it, cmd.substringBefore(' ')) }
 
     fun stop() {
-        wm?.destroy(); server?.destroy()
-        wm = null; server = null
+        appProcess?.destroy(); wm?.destroy(); server?.destroy()
+        appProcess = null; wm = null; server = null
+    }
+
+    companion object {
+        /** Openbox config for app windows: no decorations, normal windows maximized (see DebianSystem.applyDroidLayer). */
+        const val APP_RC = "etc/xdg/openbox/kdx-app.xml"
+        @Volatile private var sharedBus: Process? = null
     }
 
     fun drain(p: Process, tag: String) = Thread {
@@ -99,6 +146,38 @@ class FlatpakRunner(val sys: DebianSystem, private val display: LinuxDisplay) {
         return homes.map { File(it, "runtime/$name/$arch/$branch/active/files") }.firstOrNull { it.isDirectory }
     }
 
+    /** Installed deploy dirs (…/active) of a runtime-type ref name, any branch, preferring [branch]. */
+    private fun installedRefs(name: String, arch: String, branch: String?): List<File> =
+        homes.flatMap { h -> (File(h, "runtime/$name/$arch").listFiles() ?: emptyArray()).map { File(it, "active") } }
+            .filter { File(it, "files").isDirectory }
+            .sortedByDescending { it.parentFile?.name == branch }
+
+    /**
+     * Flatpak extensions ([Extension …] groups in runtime/app metadata): GL drivers, codecs, themes, plugins…
+     * Returns (guest mount point, host dir) pairs plus extra library dirs, the way flatpak mounts them.
+     */
+    fun extensionMounts(metadata: String, base: String, arch: String, defaultBranch: String): Pair<List<Pair<String, String>>, List<String>> {
+        val mounts = mutableListOf<Pair<String, String>>()
+        val ldPaths = mutableListOf<String>()
+        DroidSystem.parseIni(metadata).filterKeys { it.startsWith("Extension ") }.forEach { (group, ext) ->
+            val extName = group.removePrefix("Extension ").trim()
+            val dir = ext["directory"] ?: return@forEach
+            val versions = (ext["versions"] ?: ext["version"] ?: defaultBranch).split(';').filter { it.isNotBlank() }
+            val subdirs = ext["subdirectories"] == "true"
+            val names = if (subdirs) homes.flatMap { h -> (File(h, "runtime").listFiles() ?: emptyArray()).map { it.name } }
+                .filter { it.startsWith("$extName.") && !it.endsWith(".Debug") && !it.endsWith(".Locale") || it == extName }.distinct()
+            else listOf(extName)
+            names.forEach { n ->
+                val found = versions.firstNotNullOfOrNull { v -> installedRefs(n, arch, v).firstOrNull { it.parentFile?.name == v } }
+                    ?: installedRefs(n, arch, versions.firstOrNull()).firstOrNull() ?: return@forEach
+                val guest = if (subdirs && n != extName) "$base/$dir/${n.removePrefix("$extName.")}" else "$base/$dir"
+                mounts += guest to File(found, "files").path
+                ext["add-ld-path"]?.let { ldPaths += "$guest/$it" }
+            }
+        }
+        return mounts to ldPaths
+    }
+
     private val triplet get() = when (sys.arch) { "amd64" -> "x86_64-linux-gnu"; "arm64" -> "aarch64-linux-gnu"; "armhf" -> "arm-linux-gnueabihf"; else -> "i386-linux-gnu" }
 
     /** Builds the process that runs [id]. Throws with a readable message if something is missing. */
@@ -127,20 +206,30 @@ class FlatpakRunner(val sys: DebianSystem, private val display: LinuxDisplay) {
             val host = File(sys.root, "etc/$f")
             if (Files.exists(host.toPath())) binds += "/etc/$f" to host.path
         }
-        // GL driver extension (Mesa software rendering), if installed
-        homes.flatMap { h -> (File(h, "runtime/org.freedesktop.Platform.GL.default").listFiles() ?: emptyArray()).toList() }
-            .flatMap { a -> (a.listFiles() ?: emptyArray()).toList() }
-            .map { File(it, "active/files") }.firstOrNull { it.isDirectory }
-            ?.let { binds += "/usr/lib/$triplet/GL/default" to it.path }
+        // Extensions of the runtime (GL drivers = Mesa llvmpipe, codecs, ...) and of the app (plugins, ...)
+        val ldExtra = mutableListOf<String>()
+        val rtParts = runtimeRef.split('/')
+        val rtArch = rtParts.getOrElse(1) { "" }; val rtBranch = rtParts.getOrElse(2) { "" }
+        File(runtime.parentFile, "metadata").takeIf { it.isFile }?.let { m ->
+            val (mnt, ld) = extensionMounts(m.readText(), "/usr", rtArch, rtBranch); binds += mnt; ldExtra += ld
+        }
+        val (appMnt, appLd) = extensionMounts(File(app, "metadata").readText(), "/app", rtArch, "stable")
+        binds += appMnt; ldExtra += appLd
+        // the shared D-Bus session bus lives in /tmp/runtime-root (bound via /tmp)
 
         val dataHome = "/root/.var/app/$id"
         listOf("config", "data", "cache").forEach { File(sys.root, "root/.var/app/$id/$it").mkdirs() }
         val env = display.env + mapOf(
             "PATH" to "/app/bin:/usr/bin", "FLATPAK_ID" to id, "container" to "flatpak",
-            "LD_LIBRARY_PATH" to "/app/lib:/app/lib/$triplet",
+            "LD_LIBRARY_PATH" to (listOf("/app/lib", "/app/lib/$triplet") + ldExtra + "/usr/lib/$triplet/GL/default/lib").joinToString(":"),
             "XDG_DATA_DIRS" to "/app/share:/usr/share:/usr/share/runtime/share:/run/host/share",
             "XDG_CONFIG_HOME" to "$dataHome/config", "XDG_DATA_HOME" to "$dataHome/data", "XDG_CACHE_HOME" to "$dataHome/cache",
             "GIO_USE_VFS" to "local", "GTK_USE_PORTAL" to "0",
+            // Chromium/Electron's own sandbox needs kernel namespaces Android doesn't give apps
+            "ZYPAK_DISABLE_SANDBOX" to "1", "ELECTRON_DISABLE_SANDBOX" to "1", "ELECTRON_NO_SANDBOX" to "1",
+            "QTWEBENGINE_DISABLE_SANDBOX" to "1", "MOZ_DISABLE_CONTENT_SANDBOX" to "1",
+            "__EGL_VENDOR_LIBRARY_DIRS" to "/usr/lib/$triplet/GL/default/share/glvnd/egl_vendor.d",
+            "LIBGL_DRIVERS_PATH" to "/usr/lib/$triplet/GL/default/lib/dri",
         ) + (ini["Environment"] ?: emptyMap())
         val exe = if (command.startsWith("/")) command else listOf("/app/bin/$command", "/usr/bin/$command")
             .firstOrNull { File(sb, it).exists() || File(if (it.startsWith("/app")) File(app, "files") else runtime, it.substringAfter('/').substringAfter('/')).exists() }
@@ -148,6 +237,13 @@ class FlatpakRunner(val sys: DebianSystem, private val display: LinuxDisplay) {
         return sys.command(listOf(exe) + args, "/root", env, rootfs = sb, binds = binds)
     }
 
-    fun launch(id: String, args: List<String> = emptyList()): Process =
-        command(id, args).start().also { it.outputStream.close(); display.drain(it, id) }
+    fun launch(id: String, args: List<String> = emptyList(), on: LinuxDisplay = display): Process {
+        val pb = command(id, args)
+        // point the app at the display it was given
+        if (on !== display) {
+            val cmd = pb.command()
+            cmd.indexOfFirst { it.startsWith("DISPLAY=") }.takeIf { it >= 0 }?.let { cmd[it] = "DISPLAY=:${on.display}" }
+        }
+        return pb.start().also { it.outputStream.close(); on.drain(it, id) }
+    }
 }

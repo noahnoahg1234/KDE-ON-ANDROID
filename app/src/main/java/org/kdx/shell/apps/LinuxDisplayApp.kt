@@ -23,14 +23,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.key.*
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -39,6 +38,7 @@ import org.kdx.shell.core.KApp
 import org.kdx.shell.core.KWindow
 import org.kdx.shell.core.KdxState
 import org.kdx.shell.core.LocalBreeze
+import org.kdx.shell.droid.LinuxDisplay
 import org.kdx.shell.droid.RfbClient
 import java.io.Closeable
 import kotlin.math.abs
@@ -50,21 +50,25 @@ class DisplaySession : Closeable {
     var rfb: RfbClient? = null
     var bitmap by mutableStateOf<Bitmap?>(null)
     var frame by mutableIntStateOf(0)
-    var status by mutableStateOf("Connecting…")
+    var status by mutableStateOf("Starting…")
     var connected by mutableStateOf(false)
     var zoom by mutableFloatStateOf(1f)
     var pan by mutableStateOf(Offset.Zero)
     var keyboard by mutableStateOf(false)
+    var showKeys by mutableStateOf(false)
+    /** Touch mode: drag scrolls like a touchscreen. Mouse mode: drag = mouse drag. */
+    var touchMode by mutableStateOf(true)
     var modifiers by mutableIntStateOf(0) // bit0 ctrl, bit1 alt, bit2 super (sticky)
+    var onClose: () -> Unit = {}
 
     fun connect(port: Int) {
         if (connected) return
         scope.launch {
-            status = "Connecting…"
+            status = "Starting…"
             val client = RfbClient(port = port)
             val ok = withContext(Dispatchers.IO) {
                 var err: Throwable? = null
-                repeat(30) { runCatching { client.connect(); return@withContext true }.onFailure { err = it }; delay(300) }
+                repeat(60) { runCatching { client.connect(); return@withContext true }.onFailure { err = it }; delay(300) }
                 status = "Can't connect to the display: ${err?.message}"
                 false
             }
@@ -85,22 +89,29 @@ class DisplaySession : Closeable {
         }
     }
 
-    override fun close() { rfb?.close(); scope.cancel() }
+    override fun close() { rfb?.close(); scope.cancel(); onClose() }
 }
 
 private const val M_CTRL = 1
 private const val M_ALT = 2
 private const val M_SUPER = 4
 
-/** Linux Display – shows DroidSystem's X display; touch becomes mouse input. */
+/**
+ * Linux Display – shows an X display. With arg "app:N" it is one Linux/Flatpak app's own window: it takes the app's
+ * title, resizes the X screen to fit, and closes when the app exits. Without an arg it's the shared Linux desktop.
+ */
 @Composable
 fun LinuxDisplayApp(state: KdxState, w: KWindow) {
     val c = LocalBreeze.current
-    val disp = state.linuxDisplay
-    val s = remember(w) { w.retain("display") { DisplaySession() } }
+    val appNo = w.arg?.takeIf { it.startsWith("app:") }?.removePrefix("app:")?.toIntOrNull()
+    val disp: LinuxDisplay? = if (appNo != null) state.appDisplay(appNo) else state.linuxDisplay
+    val s = remember(w) {
+        w.retain("display") { DisplaySession().also { ds -> if (appNo != null) ds.onClose = { state.releaseDisplay(appNo) } } }
+    }
     if (disp == null) {
         Box(Modifier.fillMaxSize().background(c.window).padding(24.dp), Alignment.Center) {
-            Text("Linux apps need DroidSystem 2 (Debian). Turn on the Linux system in System Settings.", color = c.inactiveText)
+            Text(if (appNo != null) "This app has stopped." else "Linux apps need DroidSystem 2 (Debian). Turn on the Linux system in System Settings.",
+                color = c.inactiveText)
         }
         return
     }
@@ -115,42 +126,75 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
         }
         return
     }
-    LaunchedEffect(Unit) {
-        if (!disp.isRunning()) withContext(Dispatchers.IO) { runCatching { disp.start(1280, 800) }.onFailure { s.status = it.message ?: "Display failed" } }
+    val appName = remember(w) { w.title }
+    LaunchedEffect(disp) {
+        if (appNo == null && !disp.isRunning()) withContext(Dispatchers.IO) { runCatching { disp.start(1280, 800) }.onFailure { s.status = it.message ?: "Display failed" } }
         s.connect(disp.port)
+    }
+    if (appNo != null) {
+        // the KDX window follows the app: its window title, and it closes when the app quits
+        LaunchedEffect(disp) {
+            var seenAlive = false
+            while (true) {
+                delay(2000)
+                val p = disp.appProcess
+                if (p != null) {
+                    if (p.isAlive) seenAlive = true
+                    else if (seenAlive || s.connected) { state.toast("$appName closed"); state.close(w); break }
+                }
+                val t = withContext(Dispatchers.IO) { disp.windowTitle() }
+                w.title = t?.takeIf { it.isNotBlank() } ?: appName
+            }
+        }
     }
     val focus = remember { FocusRequester() }
     var typed by remember { mutableStateOf(TextFieldValue(" ")) }
+    val density = LocalDensity.current.density
 
     Column(Modifier.fillMaxSize().background(Color.Black)) {
         // toolbar
-        Row(Modifier.fillMaxWidth().background(c.header).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton({ s.keyboard = !s.keyboard; if (s.keyboard) runCatching { focus.requestFocus() } }) {
+        Row(Modifier.fillMaxWidth().background(c.header).padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton({ s.keyboard = !s.keyboard; if (s.keyboard) runCatching { focus.requestFocus() } }, Modifier.size(40.dp)) {
                 Icon(Icons.Filled.Keyboard, "Keyboard", tint = if (s.keyboard) c.accent else c.text)
             }
-            LazyRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                val keys = listOf("Esc" to RfbClient.KEY_ESCAPE, "Tab" to RfbClient.KEY_TAB, "←" to RfbClient.KEY_LEFT, "↑" to RfbClient.KEY_UP,
-                    "↓" to RfbClient.KEY_DOWN, "→" to RfbClient.KEY_RIGHT, "Enter" to RfbClient.KEY_RETURN, "⌫" to RfbClient.KEY_BACKSPACE)
-                items(listOf("Ctrl" to M_CTRL, "Alt" to M_ALT, "Super" to M_SUPER)) { (label, bit) ->
-                    FilterChip(s.modifiers and bit != 0, { s.modifiers = s.modifiers xor bit }, label = { Text(label, fontSize = 12.sp) })
-                }
-                items(keys) { (label, sym) ->
-                    AssistChip({ sendKey(s, sym) }, label = { Text(label, fontSize = 12.sp) })
-                }
+            IconButton({ s.touchMode = !s.touchMode }, Modifier.size(40.dp)) {
+                Icon(if (s.touchMode) Icons.Filled.TouchApp else Icons.Filled.Mouse, if (s.touchMode) "Touch mode" else "Mouse mode", tint = c.text)
             }
-            IconButton({ s.zoom = 1f; s.pan = Offset.Zero }) { Icon(Icons.Filled.FitScreen, "Fit") }
+            IconButton({ s.showKeys = !s.showKeys }, Modifier.size(40.dp)) {
+                Icon(Icons.Filled.KeyboardCommandKey, "Special keys", tint = if (s.showKeys) c.accent else c.text)
+            }
+            Text(if (s.touchMode) "Touch: tap, drag to scroll, hold for right-click, hold+drag to drag" else "Mouse: drag = drag, hold = right-click",
+                Modifier.weight(1f).padding(horizontal = 4.dp), color = c.inactiveText, fontSize = 11.sp, maxLines = 1)
+            if (s.zoom > 1.01f) IconButton({ s.zoom = 1f; s.pan = Offset.Zero }, Modifier.size(40.dp)) { Icon(Icons.Filled.FitScreen, "Fit") }
+        }
+        if (s.showKeys) LazyRow(Modifier.fillMaxWidth().background(c.header), horizontalArrangement = Arrangement.spacedBy(2.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp)) {
+            val keys = listOf("Esc" to RfbClient.KEY_ESCAPE, "Tab" to RfbClient.KEY_TAB, "←" to RfbClient.KEY_LEFT, "↑" to RfbClient.KEY_UP,
+                "↓" to RfbClient.KEY_DOWN, "→" to RfbClient.KEY_RIGHT, "Enter" to RfbClient.KEY_RETURN, "⌫" to RfbClient.KEY_BACKSPACE,
+                "Del" to RfbClient.KEY_DELETE, "Home" to RfbClient.KEY_HOME, "End" to RfbClient.KEY_END)
+            items(listOf("Ctrl" to M_CTRL, "Alt" to M_ALT, "Super" to M_SUPER)) { (label, bit) ->
+                FilterChip(s.modifiers and bit != 0, { s.modifiers = s.modifiers xor bit }, label = { Text(label, fontSize = 12.sp) })
+            }
+            items(keys) { (label, sym) -> AssistChip({ sendKey(s, sym) }, label = { Text(label, fontSize = 12.sp) }) }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             val bmp = s.bitmap
+            var size by remember { mutableStateOf(IntSize.Zero) }
+            // app windows: make the X screen match this window's shape (debounced)
+            if (appNo != null) LaunchedEffect(size, s.connected) {
+                if (!s.connected || size.width == 0) return@LaunchedEffect
+                delay(500)
+                val wDp = size.width / density; val hDp = size.height / density
+                val f = state.xScale(wDp)
+                s.rfb?.setDesktopSize(((wDp * f).toInt() / 8 * 8).coerceIn(320, 3840), (hDp * f).toInt().coerceIn(240, 2160))
+            }
             if (bmp == null || !s.connected) {
-                Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (s.status.startsWith("Connecting")) CircularProgressIndicator()
+                Column(Modifier.align(Alignment.Center).onSizeChanged { size = it }, horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (!s.status.startsWith("Can't") && s.status != "Display closed") CircularProgressIndicator()
                     Text(s.status, color = Color.White, modifier = Modifier.padding(12.dp))
-                    if (!s.connected && !s.status.startsWith("Connecting")) Button({ s.connect(disp.port) }) { Text("Reconnect") }
+                    if (s.status.startsWith("Can't") || s.status == "Display closed") Button({ s.connect(disp.port) }) { Text("Reconnect") }
                 }
             } else {
-                var size by remember { mutableStateOf(IntSize.Zero) }
-                // fit framebuffer into the window, then apply pinch zoom / pan
                 val fit = if (size.width == 0) 1f else minOf(size.width.toFloat() / bmp.width, size.height.toFloat() / bmp.height)
                 val scale = fit * s.zoom
                 val origin = Offset((size.width - bmp.width * scale) / 2f, (size.height - bmp.height * scale) / 2f) + s.pan
@@ -158,56 +202,7 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
                 Canvas(
                     Modifier.fillMaxSize()
                         .onSizeChanged { size = it }
-                        .pointerInput(bmp) {
-                            awaitEachGesture {
-                                val down = awaitFirstDown()
-                                val rfb = s.rfb ?: return@awaitEachGesture
-                                val start = down.position
-                                val t0 = System.currentTimeMillis()
-                                var dragging = false
-                                var multi = false
-                                var lastDist = 0f
-                                var lastCentroid = Offset.Zero
-                                var (fx, fy) = toFb(start)
-                                rfb.pointer(fx, fy, 0)
-                                while (true) {
-                                    val ev = awaitPointerEvent()
-                                    val pressed = ev.changes.filter { it.pressed }
-                                    if (pressed.size >= 2) {
-                                        // two fingers: pinch zoom + pan (or scroll when not zoomed)
-                                        val a = pressed[0].position; val b = pressed[1].position
-                                        val dist = hypot(a.x - b.x, a.y - b.y); val cen = (a + b) / 2f
-                                        if (multi) {
-                                            if (lastDist > 0) s.zoom = (s.zoom * dist / lastDist).coerceIn(1f, 5f)
-                                            if (s.zoom > 1.01f) s.pan += cen - lastCentroid
-                                            else if (abs(cen.y - lastCentroid.y) > 18) {
-                                                val (sx, sy) = toFb(cen)
-                                                val btn = if (cen.y < lastCentroid.y) 16 else 8
-                                                rfb.pointer(sx, sy, btn); rfb.pointer(sx, sy, 0)
-                                            }
-                                        }
-                                        if (!multi || abs(cen.y - lastCentroid.y) > 18) lastCentroid = cen
-                                        multi = true; lastDist = dist
-                                        ev.changes.forEach { it.consume() }
-                                        continue
-                                    }
-                                    val ch = ev.changes.firstOrNull() ?: break
-                                    if (!ch.pressed) {
-                                        if (!multi && !dragging) {
-                                            val right = System.currentTimeMillis() - t0 > 550
-                                            rfb.pointer(fx, fy, if (right) 4 else 1); rfb.pointer(fx, fy, 0)
-                                        } else if (dragging) rfb.pointer(fx, fy, 0)
-                                        break
-                                    }
-                                    if (multi) continue
-                                    if (ch.positionChanged()) {
-                                        if (!dragging && (ch.position - start).getDistance() > 12f) { dragging = true; rfb.pointer(fx, fy, 1) }
-                                        if (dragging) { toFb(ch.position).let { fx = it.first; fy = it.second }; rfb.pointer(fx, fy, 1) }
-                                        ch.consume()
-                                    }
-                                }
-                            }
-                        }
+                        .pointerInput(bmp, s.touchMode) { awaitEachGesture { gesture(s, ::toFb) } }
                 ) {
                     s.frame // redraw on every frame
                     drawContext.canvas.save()
@@ -233,6 +228,84 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
                 keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii, imeAction = ImeAction.None),
             )
         }
+    }
+}
+
+/** One touch gesture → X pointer events. */
+private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.gesture(s: DisplaySession, toFb: (Offset) -> Pair<Int, Int>) {
+    val down = awaitFirstDown()
+    val rfb = s.rfb ?: return
+    val start = down.position
+    val t0 = System.currentTimeMillis()
+    var moved = false
+    var held = false      // long-press reached before moving
+    var dragging = false  // button 1 held down
+    var multi = false
+    var lastDist = 0f
+    var lastCentroid = Offset.Zero
+    var lastScroll = start
+    var (fx, fy) = toFb(start)
+    rfb.pointer(fx, fy, 0)
+    while (true) {
+        val ev = withTimeoutOrNull(60) { awaitPointerEvent() }
+        if (ev == null) {
+            if (!moved && !held && System.currentTimeMillis() - t0 > 500) held = true
+            continue
+        }
+        val pressed = ev.changes.filter { it.pressed }
+        if (pressed.size >= 2) {
+            // two fingers: pinch to zoom, pan when zoomed, otherwise scroll
+            val a = pressed[0].position; val b = pressed[1].position
+            val dist = hypot(a.x - b.x, a.y - b.y); val cen = (a + b) / 2f
+            if (multi) {
+                if (lastDist > 0) s.zoom = (s.zoom * dist / lastDist).coerceIn(1f, 5f)
+                if (s.zoom > 1.01f) { s.pan += cen - lastCentroid; lastCentroid = cen }
+                else if (abs(cen.y - lastCentroid.y) > 30) {
+                    val (sx, sy) = toFb(cen); val btn = if (cen.y < lastCentroid.y) 16 else 8
+                    rfb.pointer(sx, sy, btn); rfb.pointer(sx, sy, 0); lastCentroid = cen
+                }
+            } else lastCentroid = cen
+            if (dragging) { rfb.pointer(fx, fy, 0); dragging = false }
+            multi = true; lastDist = dist
+            ev.changes.forEach { it.consume() }
+            continue
+        }
+        val ch = ev.changes.firstOrNull() ?: break
+        if (!ch.pressed) {
+            when {
+                multi -> {}
+                dragging -> rfb.pointer(fx, fy, 0)
+                !moved -> {
+                    val right = held || System.currentTimeMillis() - t0 > 500
+                    rfb.pointer(fx, fy, if (right) 4 else 1); rfb.pointer(fx, fy, 0)
+                }
+            }
+            break
+        }
+        if (multi || !ch.positionChanged()) continue
+        val dist = (ch.position - start).getDistance()
+        if (!moved && dist > 14f) {
+            moved = true
+            if (!s.touchMode || held) { dragging = true; rfb.pointer(fx, fy, 1) } // mouse mode, or hold-then-drag
+        }
+        if (dragging) {
+            toFb(ch.position).let { fx = it.first; fy = it.second }; rfb.pointer(fx, fy, 1)
+        } else if (moved) {
+            // touch scrolling: finger up = content moves up = wheel down (natural scrolling)
+            val dy = ch.position.y - lastScroll.y; val dx = ch.position.x - lastScroll.x
+            val step = 40f
+            if (abs(dy) >= step) {
+                val btn = if (dy < 0) 16 else 8
+                repeat((abs(dy) / step).toInt().coerceAtMost(5)) { rfb.pointer(fx, fy, btn); rfb.pointer(fx, fy, 0) }
+                lastScroll = Offset(lastScroll.x, ch.position.y)
+            }
+            if (abs(dx) >= step * 1.5f) {
+                val btn = if (dx < 0) 64 else 32 // buttons 7/6 = horizontal wheel
+                rfb.pointer(fx, fy, btn); rfb.pointer(fx, fy, 0)
+                lastScroll = Offset(ch.position.x, lastScroll.y)
+            }
+        }
+        ch.consume()
     }
 }
 

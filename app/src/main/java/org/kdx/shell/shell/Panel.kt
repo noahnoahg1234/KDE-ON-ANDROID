@@ -157,7 +157,7 @@ private fun TaskButton(state: KdxState, w: KWindow, compact: Boolean) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = if (compact) Arrangement.Center else Arrangement.Start,
             ) {
-                Box(Modifier.alpha(if (w.minimized) 0.55f else 1f)) { KAppIcon(w.app, 26.dp) }
+                Box(Modifier.alpha(if (w.minimized) 0.55f else 1f)) { WindowIcon(w, 26.dp) }
                 if (!compact) {
                     Spacer(Modifier.width(6.dp))
                     Text(w.title, color = c.panelText, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)

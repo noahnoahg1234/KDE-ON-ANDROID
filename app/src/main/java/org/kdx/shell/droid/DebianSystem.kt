@@ -244,10 +244,34 @@ class DebianSystem(
             |# Installs the X display server used by KDX's Linux Display window.
             |set -e
             |apt-get update
-            |apt-get install -y tigervnc-standalone-server openbox dbus-x11 x11-xserver-utils fonts-dejavu-core adwaita-icon-theme
+            |apt-get install -y tigervnc-standalone-server openbox dbus dbus-x11 x11-xserver-utils x11-utils xdotool fonts-dejavu-core adwaita-icon-theme
             |echo "Display server ready. Linux apps with windows now open in KDX's Linux Display."
             |""".trimMargin())
         tool("droidsystem-version", "#!/bin/sh\n. /etc/os-release\necho \"\$PRETTY_NAME\"\n")
+        // Openbox for KDX app windows: KDX draws the title bar, so no decorations; main windows fill the screen
+        File(root, LinuxDisplay.APP_RC).apply { parentFile?.mkdirs() }.writeText(
+            """<?xml version="1.0" encoding="UTF-8"?>
+            |<openbox_config xmlns="http://openbox.org/3.4/rc">
+            |  <focus><focusNew>yes</focusNew><followMouse>no</followMouse></focus>
+            |  <placement><policy>Smart</policy><center>yes</center></placement>
+            |  <desktops><number>1</number></desktops>
+            |  <applications>
+            |    <application class="*"><decor>no</decor></application>
+            |    <application class="*" type="normal"><decor>no</decor><maximized>yes</maximized></application>
+            |  </applications>
+            |</openbox_config>
+            |""".trimMargin())
+        stateDir.mkdirs()
+        File(stateDir, "layer").writeText(LAYER_VERSION.toString())
+    }
+
+    /** Re-applies the DroidSystem layer when KDX ships a newer one (existing installs get new tools/config). */
+    fun ensureLayer(): Boolean {
+        if (!isInstalled) return false
+        val cur = runCatching { File(stateDir, "layer").readText().trim().toInt() }.getOrDefault(0)
+        if (cur >= LAYER_VERSION) return false
+        applyDroidLayer()
+        return true
     }
 
     // ------------------------------------------------------------------ unpacking
@@ -270,6 +294,9 @@ class DebianSystem(
     }
 
     companion object {
+        /** Bump when applyDroidLayer changes. 2: app-window Openbox config, xdotool/dbus in display-setup. */
+        const val LAYER_VERSION = 2
+
         /** Extracts a tar stream into [dest] preserving symlinks, hard links (as copies) and permission bits. */
         fun extractTar(input: InputStream, dest: File) {
             val tar = TarArchiveInputStream(input, "UTF-8")
