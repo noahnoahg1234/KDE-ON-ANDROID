@@ -42,13 +42,16 @@ Turn it on in **System Settings → Linux System (DroidSystem)**. KDX installs *
 system, into a `DroidSystem/` folder on your phone (or KDX's private folder if file access hasn't been granted).
 DroidSystem is written for KDX and bundled inside the APK (`app/src/main/assets/droidsystem`), so **nothing is downloaded**.
 
-| Settings | Bazaar | App page | dsfetch |
+| Settings | Bazaar | Flathub app | DroidSystem app |
 |---|---|---|---|
-| ![](docs/screenshots/droidsystem-settings.jpg) | ![](docs/screenshots/bazaar-explore.jpg) | ![](docs/screenshots/bazaar-detail.jpg) | ![](docs/screenshots/droidsystem-dsfetch.jpg) |
+| ![](docs/screenshots/droidsystem-settings.jpg) | ![](docs/screenshots/bazaar-explore.jpg) | ![](docs/screenshots/bazaar-flathub-app.jpg) | ![](docs/screenshots/bazaar-detail.jpg) |
 
-- **Bazaar** (installed by default): a graphical app store with Explore (featured app and categories), Installed and
-  Updates tabs, search, app pages with version/source/permissions, and one-tap Install / Open / Remove / Update for
-  Flatpaks and dspkg packages. Open it from Kickoff or type `bazaar` in Konsole.
+- **Bazaar** (installed by default): a graphical app store. It loads the **live Flathub catalog** (trending, popular,
+  new, ten categories, search) with real icons, screenshots, descriptions, sizes, install counts and permissions, and
+  caches it for offline use. Flathub apps are desktop Linux programs Android can't run, so their Install button explains
+  that and offers to save the `.flatpakref` (for a Linux PC) or find an Android version on Google Play. Apps marked
+  **Runs on DroidSystem** install, open, update and remove with one tap. The Flathub catalog can be turned off from
+  Bazaar's menu. Open Bazaar from Kickoff or type `bazaar` in Konsole.
 
 - **File system**: `etc/` (os-release, passwd, motd, profile), `home/user`, `usr/bin`, `usr/share/applications`, `var/lib/{dspkg,flatpak}`, …
 - **Konsole becomes a DroidSystem shell** (`user@droidsystem:~$`) with `dsfetch`, `droidsystem`, `extract`, `linuxinfo`, `run-desktop`.

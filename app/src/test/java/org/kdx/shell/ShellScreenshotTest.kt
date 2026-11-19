@@ -11,6 +11,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.performTextClearance
 import androidx.lifecycle.ViewModelProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -140,6 +141,36 @@ class ShellScreenshotTest {
         }
         assertTrue("Bazaar installs apps", state.droid!!.flatpakInstalled().any { it.id == "org.droidsystem.TicTacToe" })
         shot("47-bazaar-installed")
+
+        // Real Flathub catalog (skipped when flathub.org isn't reachable)
+        val online = runCatching { java.net.URL("https://flathub.org/api/v2/collection/category").openStream().close() }.isSuccess
+        if (online) {
+            rule.runOnUiThread { state.windows.toList().forEach { state.close(it) }; state.open(KApp.BAZAAR) }
+            fun pump(until: () -> Boolean) {
+                var n = 0
+                while (!until() && n++ < 200) {
+                    rule.mainClock.advanceTimeBy(50)
+                    org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(50))
+                    Thread.sleep(50)
+                }
+            }
+            pump { rule.onAllNodes(androidx.compose.ui.test.hasText("Popular on Flathub")).fetchSemanticsNodes().isNotEmpty() &&
+                rule.onAllNodes(androidx.compose.ui.test.hasText("Flathub")).fetchSemanticsNodes().size > 3 }
+            repeat(2) { pump { false } } // let icons arrive
+            shot("48-bazaar-flathub")
+            rule.onAllNodes(androidx.compose.ui.test.hasSetTextAction()).onLast().performTextClearance()
+            rule.onAllNodes(androidx.compose.ui.test.hasSetTextAction()).onLast().performTextInput("krita")
+            pump { rule.onAllNodes(androidx.compose.ui.test.hasText("Krita")).fetchSemanticsNodes().isNotEmpty() }
+            shot("49-bazaar-search")
+            rule.onAllNodes(androidx.compose.ui.test.hasText("Krita")).onFirst().performClick()
+            pump { rule.onAllNodes(androidx.compose.ui.test.hasText("Installed size")).fetchSemanticsNodes().isNotEmpty() }
+            pump { false }
+            shot("50-bazaar-krita")
+            rule.onNodeWithText("Install").performClick()
+            rule.mainClock.advanceTimeBy(300)
+            shot("51-bazaar-install-dialog")
+            rule.onNodeWithText("Install Krita?").assertExists()
+        }
     }
 
     @Test fun konsoleRunsCommands() {

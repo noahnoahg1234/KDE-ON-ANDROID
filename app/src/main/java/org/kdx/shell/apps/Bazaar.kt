@@ -41,6 +41,9 @@ import org.kdx.shell.core.KWindow
 import org.kdx.shell.core.KdxState
 import org.kdx.shell.core.LocalBreeze
 import org.kdx.shell.droid.DroidSystem
+import org.kdx.shell.droid.Flathub
+import org.kdx.shell.droid.FlathubApp
+import org.kdx.shell.droid.FlathubDetails
 import java.io.Closeable
 
 /** One thing Bazaar can install: a Flatpak from DroidHub or a dspkg package. */
@@ -80,6 +83,78 @@ class BazaarSession : Closeable {
     var query by mutableStateOf("")
     var category by mutableStateOf("All")
     var message by mutableStateOf<String?>(null)
+
+    // ---- Flathub (online catalog) ----
+    val sections = mutableStateMapOf<String, List<FlathubApp>>() // popular / trending / recently-added
+    var fhError by mutableStateOf<String?>(null)
+    var fhOffline by mutableStateOf(false)
+    /** "droid", a collection kind ("popular", …) or "cat:<category>"; null = the Explore overview. */
+    var browse by mutableStateOf<String?>(null)
+    val browseApps = mutableStateListOf<FlathubApp>()
+    var browsePage = 1
+    var browseMore by mutableStateOf(true)
+    var browseLoading by mutableStateOf(false)
+    var fhResults by mutableStateOf<List<FlathubApp>>(emptyList())
+    var fhSearching by mutableStateOf(false)
+    var fhSelected by mutableStateOf<FlathubApp?>(null)
+    val fhDetails = mutableStateMapOf<String, FlathubDetails>()
+    var fhDetailError by mutableStateOf<String?>(null)
+
+    fun loadFlathub(fh: Flathub, force: Boolean = false) {
+        if (sections.isNotEmpty() && !force) return
+        scope.launch {
+            fhError = null
+            for (kind in listOf("trending", "popular", "recently-added")) {
+                runCatching { fh.collection(kind, perPage = 20) }
+                    .onSuccess { sections[kind] = it; fhOffline = fh.offline }
+                    .onFailure { fhError = it.message }
+            }
+        }
+    }
+
+    fun openBrowse(fh: Flathub, what: String?) {
+        browse = what
+        browseApps.clear(); browsePage = 1; browseMore = what != null && what != "droid"
+        if (browseMore) loadMore(fh)
+    }
+
+    fun loadMore(fh: Flathub) {
+        val what = browse ?: return
+        if (browseLoading || !browseMore) return
+        browseLoading = true
+        scope.launch {
+            runCatching {
+                if (what.startsWith("cat:")) fh.category(what.removePrefix("cat:"), browsePage) else fh.collection(what, browsePage, 30)
+            }.onSuccess { page ->
+                if (browse == what) {
+                    browseApps.addAll(page.filter { a -> browseApps.none { it.id == a.id } })
+                    browsePage++; browseMore = page.size >= 24
+                }
+            }.onFailure { fhError = it.message; browseMore = false }
+            browseLoading = false
+        }
+    }
+
+    private var searchJob: kotlinx.coroutines.Job? = null
+
+    fun search(fh: Flathub, q: String) {
+        searchJob?.cancel()
+        if (q.length < 2) { fhSearching = false; fhResults = emptyList(); return }
+        fhSearching = true
+        searchJob = scope.launch {
+            kotlinx.coroutines.delay(350) // debounce typing
+            val r = runCatching { fh.search(q) }.onFailure { if (it !is kotlinx.coroutines.CancellationException) fhError = it.message }
+            if (q == query.trim()) { fhResults = r.getOrDefault(emptyList()); fhSearching = false }
+        }
+    }
+
+    fun openFlathub(fh: Flathub, app: FlathubApp) {
+        fhSelected = app; fhDetailError = null
+        if (app.id in fhDetails) return
+        scope.launch {
+            runCatching { fh.details(app) }.onSuccess { fhDetails[app.id] = it }.onFailure { fhDetailError = it.message }
+        }
+    }
 
     fun load(ds: DroidSystem) {
         scope.launch {
@@ -168,25 +243,52 @@ fun Bazaar(state: KdxState, w: KWindow) {
         }
         return
     }
+    val fh = state.flathub
+    val online = state.flathubEnabled
     LaunchedEffect(ds.root.path) { s.load(ds) }
+    LaunchedEffect(online) { if (online) s.loadFlathub(fh) }
+    LaunchedEffect(s.query, online) { if (online) s.search(fh, s.query.trim()) }
     LaunchedEffect(s.message) { if (s.message != null) { kotlinx.coroutines.delay(3000); s.message = null } }
     val sel = s.items.firstOrNull { it.key == s.selected }
-    LaunchedEffect(sel?.name) { w.title = if (sel != null) "${sel.name} — Bazaar" else "Bazaar" }
+    val fhSel = s.fhSelected
+    LaunchedEffect(sel?.name, fhSel?.name) { w.title = (fhSel?.name ?: sel?.name)?.let { "$it — Bazaar" } ?: "Bazaar" }
+    val canGoBack = fhSel != null || sel != null || (s.browse != null && s.query.isBlank())
+    fun back() {
+        when {
+            s.fhSelected != null -> s.fhSelected = null
+            s.selected != null -> s.selected = null
+            else -> s.openBrowse(fh, null)
+        }
+    }
+    var menu by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize().background(c.window)) {
         Column(Modifier.fillMaxSize()) {
             // Header
             Row(Modifier.fillMaxWidth().background(c.header).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (sel != null) IconButton({ s.selected = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+                if (canGoBack) IconButton(::back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
                 OutlinedTextField(
-                    s.query, { s.query = it; s.selected = null }, Modifier.weight(1f).heightIn(min = 48.dp),
-                    placeholder = { Text("Search apps and packages") }, singleLine = true,
+                    s.query, { s.query = it; s.selected = null; s.fhSelected = null }, Modifier.weight(1f).heightIn(min = 48.dp),
+                    placeholder = { Text(if (online) "Search Flathub and DroidSystem" else "Search apps and packages") }, singleLine = true,
                     leadingIcon = { Icon(Icons.Filled.Search, null) },
                     trailingIcon = { if (s.query.isNotEmpty()) IconButton({ s.query = "" }) { Icon(Icons.Filled.Close, "Clear") } },
                     shape = RoundedCornerShape(24.dp),
                 )
+                Box {
+                    IconButton({ menu = true }) { Icon(Icons.Filled.MoreVert, "Menu") }
+                    DropdownMenu(menu, { menu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Show Flathub apps") },
+                            trailingIcon = { Switch(online, null) },
+                            onClick = { state.flathubEnabled = !online; state.save(); menu = false },
+                        )
+                        DropdownMenuItem(text = { Text("Refresh") }, onClick = {
+                            menu = false; s.load(ds); if (online) s.loadFlathub(fh, force = true)
+                        })
+                    }
+                }
             }
-            if (sel == null && s.query.isBlank()) {
+            if (sel == null && fhSel == null && s.query.isBlank() && s.browse == null) {
                 TabRow(BazaarTab.entries.indexOf(s.tab), containerColor = c.header) {
                     BazaarTab.entries.forEach { t ->
                         val n = when (t) {
@@ -203,16 +305,11 @@ fun Bazaar(state: KdxState, w: KWindow) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when {
                     s.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                    fhSel != null -> FlathubDetail(state, ds, s, fh, fhSel)
                     sel != null -> AppDetail(state, ds, s, sel)
-                    s.query.isNotBlank() -> {
-                        val q = s.query.trim()
-                        val res = s.items.filter {
-                            it.name.contains(q, true) || it.id.contains(q, true) || it.summary.contains(q, true) || it.category.contains(q, true)
-                        }
-                        if (res.isEmpty()) Text("No results for \"$q\"", Modifier.align(Alignment.Center), color = c.inactiveText)
-                        else ItemList(state, ds, s, res)
-                    }
-                    s.tab == BazaarTab.EXPLORE -> Explore(state, ds, s)
+                    s.query.isNotBlank() -> SearchResults(state, ds, s, fh, online)
+                    s.browse != null -> Browse(state, ds, s, fh)
+                    s.tab == BazaarTab.EXPLORE -> if (online) FlathubExplore(state, ds, s, fh) else Explore(state, ds, s)
                     s.tab == BazaarTab.INSTALLED -> {
                         val list = s.items.filter { it.installed }
                         if (list.isEmpty()) Text("Nothing installed yet", Modifier.align(Alignment.Center), color = c.inactiveText)
@@ -406,4 +503,330 @@ private fun AppDetail(state: KdxState, ds: DroidSystem, s: BazaarSession, item: 
             }
         }
     }
+}
+
+
+// ======================================================================= Flathub UI
+
+/** An icon loaded from Flathub's CDN (cached), with a tinted placeholder while loading. */
+@Composable
+fun NetImage(fh: Flathub, url: String?, modifier: Modifier, maxPx: Int = 128, contentScale: androidx.compose.ui.layout.ContentScale = androidx.compose.ui.layout.ContentScale.Fit) {
+    val c = LocalBreeze.current
+    val img by produceState(url?.let { fh.cachedImage(it) }, url) { if (url != null && value == null) value = fh.image(url, maxPx) }
+    val bmp = img
+    if (bmp != null) androidx.compose.foundation.Image(bmp, null, modifier, contentScale = contentScale)
+    else Box(modifier.background(c.header, RoundedCornerShape(8.dp)))
+}
+
+@Composable
+private fun SectionHeader(title: String, action: String? = null, onAction: () -> Unit = {}) {
+    val c = LocalBreeze.current
+    Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 14.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, Modifier.weight(1f), color = c.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+        if (action != null) TextButton(onAction) { Text(action) }
+    }
+}
+
+@Composable
+private fun FlathubCard(fh: Flathub, app: FlathubApp, width: Dp?, onClick: () -> Unit) {
+    val c = LocalBreeze.current
+    Surface(
+        (if (width != null) Modifier.width(width) else Modifier.fillMaxWidth()).clickable(onClick = onClick),
+        shape = RoundedCornerShape(10.dp), color = c.view, border = BorderStroke(1.dp, c.border.copy(alpha = 0.6f)),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                NetImage(fh, app.icon, Modifier.size(48.dp))
+                Spacer(Modifier.weight(1f))
+                if (app.verified) Icon(Icons.Filled.Verified, "Verified", tint = c.accent, modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(app.name, color = c.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(app.summary, color = c.inactiveText, fontSize = 12.sp, maxLines = 2, minLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Flathub", color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                if (app.installsLastMonth > 0) {
+                    Spacer(Modifier.weight(1f))
+                    Icon(Icons.Filled.Download, null, tint = c.inactiveText, modifier = Modifier.size(12.dp))
+                    Text(Flathub.formatInstalls(app.installsLastMonth), color = c.inactiveText, fontSize = 11.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OfflineBanner(s: BazaarSession) {
+    val c = LocalBreeze.current
+    val msg = when {
+        s.fhOffline -> "You're offline – showing the Flathub catalog Bazaar saw last time."
+        s.fhError != null && s.sections.isEmpty() -> "Couldn't load Flathub (${s.fhError}). DroidSystem apps are still available."
+        else -> return
+    }
+    Row(Modifier.fillMaxWidth().background(c.neutral.copy(alpha = 0.15f)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Filled.CloudOff, null, tint = c.neutral, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(msg, color = c.text, fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun FlathubExplore(state: KdxState, ds: DroidSystem, s: BazaarSession, fh: Flathub) {
+    val c = LocalBreeze.current
+    val featured = s.sections["trending"]?.firstOrNull() ?: s.sections["popular"]?.firstOrNull()
+    val local = s.items.filter { it.flatpak && it.inRepo }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
+        item { OfflineBanner(s) }
+        if (featured != null) item {
+            Row(
+                Modifier.padding(10.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                    .background(Brush.linearGradient(listOf(c.accent, c.accent.copy(alpha = 0.55f), Color(0xFF2C3E50))))
+                    .clickable { s.openFlathub(fh, featured) }.padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("TRENDING ON FLATHUB", color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(featured.name, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(featured.summary, color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp, maxLines = 2)
+                }
+                Spacer(Modifier.width(12.dp))
+                NetImage(fh, featured.icon, Modifier.size(72.dp))
+            }
+        }
+        item {
+            LazyRow(contentPadding = PaddingValues(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                item { AssistChip({ s.openBrowse(fh, "droid") }, label = { Text("Runs on DroidSystem") }, leadingIcon = { Icon(Icons.Filled.Terminal, null, Modifier.size(16.dp)) }) }
+                items(fh.categories) { (id, label) ->
+                    AssistChip({ s.openBrowse(fh, "cat:$id") }, label = { Text(label) }, leadingIcon = { Icon(flathubCategoryIcon(id), null, Modifier.size(16.dp)) })
+                }
+            }
+        }
+        item { SectionHeader("Runs on DroidSystem", "See all") { s.openBrowse(fh, "droid") } }
+        item {
+            LazyRow(contentPadding = PaddingValues(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(local, key = { it.key }) { Box(Modifier.width(170.dp)) { AppCard(state, ds, s, it) } }
+            }
+        }
+        listOf("trending" to "Trending on Flathub", "popular" to "Popular on Flathub", "recently-added" to "New on Flathub").forEach { (kind, title) ->
+            val apps = s.sections[kind]
+            item { SectionHeader(title, "See all") { s.openBrowse(fh, kind) } }
+            item {
+                if (apps == null) Box(Modifier.fillMaxWidth().height(150.dp), contentAlignment = Alignment.Center) {
+                    if (s.fhError == null) CircularProgressIndicator(Modifier.size(28.dp)) else Text("Unavailable", color = c.inactiveText)
+                } else LazyRow(contentPadding = PaddingValues(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(apps, key = { "$kind:${it.id}" }) { a -> FlathubCard(fh, a, 170.dp) { s.openFlathub(fh, a) } }
+                }
+            }
+        }
+        item {
+            Text(
+                "Catalog from flathub.org. Flathub apps are desktop Linux programs: you can browse them and save them for a " +
+                    "Linux PC, while apps marked \"Runs on DroidSystem\" install and run on this phone.",
+                Modifier.padding(14.dp), color = c.inactiveText, fontSize = 12.sp,
+            )
+        }
+    }
+}
+
+private fun flathubCategoryIcon(id: String): ImageVector = when (id) {
+    "audiovideo" -> Icons.Filled.Movie
+    "development" -> Icons.Filled.Code
+    "education" -> Icons.Filled.School
+    "game" -> Icons.Filled.SportsEsports
+    "graphics" -> Icons.Filled.Brush
+    "network" -> Icons.Filled.Language
+    "office" -> Icons.Filled.Description
+    "science" -> Icons.Filled.Science
+    "system" -> Icons.Filled.Settings
+    else -> Icons.Filled.Build
+}
+
+@Composable
+private fun Browse(state: KdxState, ds: DroidSystem, s: BazaarSession, fh: Flathub) {
+    val c = LocalBreeze.current
+    val what = s.browse ?: return
+    val title = when {
+        what == "droid" -> "Runs on DroidSystem"
+        what.startsWith("cat:") -> fh.categoryLabel(what.removePrefix("cat:"))
+        what == "trending" -> "Trending on Flathub"
+        what == "popular" -> "Popular on Flathub"
+        what == "recently-added" -> "New on Flathub"
+        else -> what
+    }
+    if (what == "droid") {
+        Column { SectionHeader(title); Explore(state, ds, s) }
+        return
+    }
+    LazyVerticalGrid(GridCells.Adaptive(160.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item(span = { GridItemSpan(maxLineSpan) }) { Text(title, color = c.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold) }
+        items(s.browseApps, key = { it.id }) { a -> FlathubCard(fh, a, null) { s.openFlathub(fh, a) } }
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
+                when {
+                    s.browseLoading -> CircularProgressIndicator(Modifier.size(28.dp))
+                    s.browseMore -> OutlinedButton({ s.loadMore(fh) }) { Text("Load more") }
+                    s.browseApps.isEmpty() -> Text("Nothing here (are you offline?)", color = c.inactiveText)
+                }
+            }
+        }
+    }
+    // automatically fetch the first page
+    LaunchedEffect(what) { if (s.browseApps.isEmpty()) s.loadMore(fh) }
+}
+
+@Composable
+private fun SearchResults(state: KdxState, ds: DroidSystem, s: BazaarSession, fh: Flathub, online: Boolean) {
+    val c = LocalBreeze.current
+    val q = s.query.trim()
+    val local = s.items.filter {
+        it.name.contains(q, true) || it.id.contains(q, true) || it.summary.contains(q, true) || it.category.contains(q, true)
+    }
+    LazyColumn(Modifier.fillMaxSize()) {
+        if (local.isNotEmpty()) {
+            item { SectionHeader("Runs on DroidSystem") }
+            items(local, key = { it.key }) { item ->
+                Row(Modifier.fillMaxWidth().clickable { s.selected = item.key }.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    StoreIcon(item, 40.dp); Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(item.name, color = c.text, fontWeight = FontWeight.Medium)
+                        Text(item.summary, color = c.inactiveText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    ActionButton(state, ds, s, item, compact = true)
+                }
+            }
+        }
+        if (online) {
+            item { SectionHeader("Flathub") }
+            if (s.fhSearching) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 14.dp)) }
+            items(s.fhResults, key = { "fh:" + it.id }) { a ->
+                Row(Modifier.fillMaxWidth().clickable { s.openFlathub(fh, a) }.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    NetImage(fh, a.icon, Modifier.size(40.dp)); Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(a.name, color = c.text, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (a.verified) { Spacer(Modifier.width(4.dp)); Icon(Icons.Filled.Verified, null, tint = c.accent, modifier = Modifier.size(14.dp)) }
+                        }
+                        Text(a.summary, color = c.inactiveText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+            if (!s.fhSearching && s.fhResults.isEmpty() && q.length >= 2) item {
+                Text("No Flathub results for \"$q\"", Modifier.padding(14.dp), color = c.inactiveText)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FlathubDetail(state: KdxState, ds: DroidSystem, s: BazaarSession, fh: Flathub, app: FlathubApp) {
+    val c = LocalBreeze.current
+    val d = s.fhDetails[app.id]
+    val a = d?.app ?: app
+    var getDialog by remember { mutableStateOf(false) }
+    val runnable = remember(a.id, s.items) { s.items.firstOrNull { it.flatpak && it.id == a.id } }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            NetImage(fh, a.icon, Modifier.size(88.dp))
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(a.name, color = c.text, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(a.developer, color = c.accent, fontSize = 14.sp)
+                    if (a.verified) { Spacer(Modifier.width(4.dp)); Icon(Icons.Filled.Verified, "Verified", tint = c.accent, modifier = Modifier.size(16.dp)) }
+                }
+                Text(a.summary, color = c.inactiveText, fontSize = 13.sp)
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (runnable != null) ActionButton(state, ds, s, runnable, compact = false)
+            else Button({ getDialog = true }) { Text("Install") }
+            OutlinedButton({ state.openUrl("https://flathub.org/apps/${a.id}") }) { Text("Flathub page") }
+        }
+        if (runnable == null) Text(
+            "Desktop Linux app (${a.arches.joinToString().ifEmpty { "Flatpak" }})",
+            Modifier.padding(top = 6.dp), color = c.inactiveText, fontSize = 12.sp,
+        )
+        if (d == null) {
+            Spacer(Modifier.height(24.dp))
+            if (s.fhDetailError != null) Text("Couldn't load details: ${s.fhDetailError}", color = c.negative, fontSize = 13.sp)
+            else LinearProgressIndicator(Modifier.fillMaxWidth())
+            return@Column
+        }
+        if (d.screenshots.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(d.screenshots) { url ->
+                    NetImage(fh, url, Modifier.height(200.dp).width(340.dp).clip(RoundedCornerShape(8.dp)), maxPx = 800,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(d.description, color = c.text, fontSize = 15.sp, lineHeight = 22.sp)
+        Spacer(Modifier.height(16.dp))
+        Surface(shape = RoundedCornerShape(10.dp), color = c.view, border = BorderStroke(1.dp, c.border.copy(alpha = 0.6f))) {
+            Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                listOfNotNull(
+                    d.version?.let { "Version" to it },
+                    "Developer" to a.developer,
+                    a.license.takeIf { it.isNotEmpty() }?.let { "License" to it.replace("LicenseRef-proprietary", "Proprietary") },
+                    d.downloadSize?.let { "Download" to humanSize(it) },
+                    d.installedSize?.let { "Installed size" to humanSize(it) },
+                    a.installsLastMonth.takeIf { it > 0 }?.let { "Installs" to "${Flathub.formatInstalls(it)} last month" },
+                    "Architectures" to a.arches.joinToString().ifEmpty { "?" },
+                    "Category" to fh.categoryLabel(a.category),
+                    "ID" to a.id,
+                ).forEach { (k, v) ->
+                    Row(Modifier.padding(vertical = 4.dp)) {
+                        Text(k, Modifier.width(110.dp), color = c.inactiveText, fontSize = 13.sp)
+                        Text(v, color = c.text, fontSize = 13.sp)
+                    }
+                }
+                d.homepage?.let { h -> TextButton({ state.openUrl(h) }, contentPadding = PaddingValues(0.dp)) { Text("Website") } }
+            }
+        }
+        if (d.permissions.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+            Text("Permissions", color = c.text, fontWeight = FontWeight.SemiBold)
+            d.permissions.forEach { p ->
+                Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Shield, null, tint = c.inactiveText, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(p, color = c.text, fontSize = 13.sp)
+                }
+            }
+        }
+    }
+    if (getDialog) AlertDialog(
+        onDismissRequest = { getDialog = false },
+        icon = { Icon(Icons.Filled.Info, null) },
+        title = { Text("Install ${a.name}?") },
+        text = {
+            Text(
+                "${a.name} is a desktop Linux app from Flathub. Android doesn't let apps run desktop Linux programs, so it " +
+                    "can't run on this phone, even inside DroidSystem.\n\nYou can save its .flatpakref to install it on a Linux PC " +
+                    "(flatpak install ${a.id}.flatpakref), or look for an Android version.",
+            )
+        },
+        confirmButton = {
+            TextButton({
+                getDialog = false
+                s.scope.launch {
+                    runCatching { fh.saveFlatpakref(a.id, java.io.File(ds.home, "Downloads")) }
+                        .onSuccess { s.message = "Saved ${it.name} to DroidSystem Downloads" }
+                        .onFailure { s.message = "Couldn't download: ${it.message}" }
+                }
+            }) { Text("Save .flatpakref") }
+        },
+        dismissButton = {
+            TextButton({ getDialog = false; state.openUrl("https://play.google.com/store/search?q=" + android.net.Uri.encode(a.name) + "&c=apps") }) {
+                Text("Find on Google Play")
+            }
+        },
+    )
 }

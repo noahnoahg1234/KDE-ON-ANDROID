@@ -115,6 +115,9 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     var droidRoot by mutableStateOf(prefs.getString("droidRoot", null))
     var flatpakEnabled by mutableStateOf(prefs.getBoolean("flatpak", true))
     var linuxFileTypes by mutableStateOf(prefs.getBoolean("linuxTypes", true))
+    /** Bazaar shows the online Flathub catalog. */
+    var flathubEnabled by mutableStateOf(prefs.getBoolean("flathub", true))
+    val flathub by lazy { org.kdx.shell.droid.Flathub(app) }
     var droidProgress by mutableStateOf<Pair<Float, String>?>(null)
     var linuxApps by mutableStateOf<List<DroidSystem.DesktopEntry>>(emptyList())
         private set
@@ -191,6 +194,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         .putString("droidRoot", droidRoot)
         .putBoolean("flatpak", flatpakEnabled)
         .putBoolean("linuxTypes", linuxFileTypes)
+        .putBoolean("flathub", flathubEnabled)
         .putInt("theme", themeMode.ordinal)
         .putInt("accent", accentIndex)
         .putInt("wallpaper", wallpaperIndex)
