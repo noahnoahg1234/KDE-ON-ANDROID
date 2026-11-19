@@ -64,7 +64,14 @@ from Google Play. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the b
 bundled for phones) does; older distribution proot builds don't.
 
 ### DroidSystem's own layer
-DroidSystem also keeps its original, fully offline layer in a `DroidSystem/` folder on your phone (mounted at
+DroidSystem's folder lives in the phone's **Android folder**: `/storage/emulated/0/Android/DroidSystem` (on a PC:
+`…/Internal storage/Android/DroidSystem`). If Android refuses new folders there, KDX uses
+`Android/data/org.kdx.shell/files/DroidSystem` instead – also inside the Android folder, but removed when KDX is
+uninstalled. Installs from older versions at `/storage/emulated/0/DroidSystem` are moved automatically. The Debian
+system files themselves stay in KDX's private storage, because Android doesn't allow programs or symlinks on shared
+storage.
+
+DroidSystem also keeps its original, fully offline layer in that folder (mounted at
 `/home/user` inside Debian), bundled inside the APK (`app/src/main/assets/droidsystem`):
 
 | Settings | Bazaar | Flathub app | DroidSystem app |

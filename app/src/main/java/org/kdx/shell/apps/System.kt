@@ -377,8 +377,8 @@ private fun LinuxSystemSection(state: KdxState) {
             val target = state.droidTargetDir()
             KV("Install location", target.path)
             if (!state.hasStorageAccess()) Text(
-                "Tip: grant KDX file access first (Dolphin → Grant) to install DroidSystem into your phone's main " +
-                    "folder, where other apps and your PC can see it.",
+                "Tip: grant KDX file access first (Dolphin → Grant) so DroidSystem can go in your phone's Android " +
+                    "folder (Android/DroidSystem), where your PC can see it.",
                 color = c.neutral, fontSize = 12.sp,
             )
         } else {

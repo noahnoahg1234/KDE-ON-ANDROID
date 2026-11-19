@@ -134,6 +134,8 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     /** Re-reads DroidSystem from disk, upgrades an older install in place, and refreshes Linux apps for Kickoff. */
     fun reloadDroid() {
         viewModelScope.launch {
+            val movedTo = withContext(Dispatchers.IO) { runCatching { moveToAndroidFolder() }.getOrNull() }
+            if (movedTo != null) toast("Moved DroidSystem to $movedTo")
             val (ds, apps, migrated) = withContext(Dispatchers.IO) {
                 val d = droidRoot?.takeIf { droidEnabled }?.let { DroidSystem(ctx, File(it)) }?.takeIf { it.isInstalled }
                 val m = d?.let { runCatching { it.migrate() }.getOrDefault(false) } ?: false
@@ -253,8 +255,43 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     }
 
     /** Where a new DroidSystem goes: the phone's storage when KDX has file access, else KDX's private folder. */
-    fun droidTargetDir(): File =
-        if (hasStorageAccess()) File(Environment.getExternalStorageDirectory(), "DroidSystem") else File(ctx.filesDir, "DroidSystem")
+    /**
+     * Where DroidSystem's folder goes: inside the phone's Android folder.
+     *  1. /storage/emulated/0/Android/DroidSystem            (needs file access; some Android versions refuse new folders here)
+     *  2. /storage/emulated/0/Android/data/org.kdx.shell/files/DroidSystem   (always allowed; removed if KDX is uninstalled)
+     *  3. KDX's private folder, if shared storage isn't available at all
+     */
+    fun droidTargetDir(): File {
+        val candidates = listOfNotNull(
+            runCatching { File(Environment.getExternalStorageDirectory(), "Android/DroidSystem") }.getOrNull()?.takeIf { hasStorageAccess() },
+            ctx.getExternalFilesDir(null)?.let { File(it, "DroidSystem") },
+        )
+        return candidates.firstOrNull { writable(it) } ?: File(ctx.filesDir, "DroidSystem")
+    }
+
+    private fun writable(dir: File): Boolean = runCatching {
+        dir.mkdirs()
+        val probe = File(dir, ".kdx-write-test")
+        probe.writeText("ok"); probe.delete()
+        true
+    }.getOrDefault(false)
+
+    /** DroidSystem 1/2 used /storage/emulated/0/DroidSystem; move such a folder into the Android folder. */
+    private fun moveToAndroidFolder(): String? {
+        val current = droidRoot?.let { File(it) } ?: return null
+        val legacy = runCatching { File(Environment.getExternalStorageDirectory(), "DroidSystem") }.getOrNull() ?: return null
+        if (current.absolutePath != legacy.absolutePath || !current.isDirectory) return null
+        val target = droidTargetDir()
+        if (target.absolutePath == current.absolutePath || File(target, "etc/os-release").isFile) return null
+        target.parentFile?.mkdirs()
+        target.delete() // the empty dir left by the write probe
+        val moved = current.renameTo(target) ||
+            (runCatching { current.copyRecursively(target, overwrite = true) }.getOrDefault(false) && current.deleteRecursively())
+        if (!moved) return null
+        droidRoot = target.path
+        save()
+        return target.path
+    }
 
     fun enableDroid() {
         if (droidProgress != null) return
