@@ -47,6 +47,7 @@ fun AppContent(state: KdxState, w: KWindow) {
         KApp.SYSMON -> SystemMonitor(state, w)
         KApp.INFOCENTER -> InfoCenter(state)
         KApp.SETTINGS -> SystemSettings(state, w)
+        KApp.BAZAAR -> Bazaar(state, w)
     }
 }
 

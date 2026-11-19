@@ -6,3 +6,9 @@ command=guess
 
 [Context]
 filesystems=home;
+
+[X-DroidHub]
+version=1.0
+category=Games
+developer=DroidSystem Project
+description=The classic number guessing game: the computer picks a number from 1 to 100 and tells you if you need to go higher or lower.

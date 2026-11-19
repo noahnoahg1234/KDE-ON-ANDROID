@@ -1,0 +1,14 @@
+[Application]
+name=org.droidsystem.Hangman
+runtime=org.droidsystem.Platform/aarch64/1.1
+sdk=org.droidsystem.Sdk/aarch64/1.1
+command=hangman
+
+[Context]
+filesystems=home;
+
+[X-DroidHub]
+version=1.0
+category=Games
+developer=DroidSystem Project
+description=Guess the hidden word before you run out of lives. Words are chosen from a list of computing and nature terms.

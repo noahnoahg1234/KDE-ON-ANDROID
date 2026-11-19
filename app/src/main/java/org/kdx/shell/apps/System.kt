@@ -368,7 +368,7 @@ private fun LinuxSystemSection(state: KdxState) {
         Spacer(Modifier.height(6.dp))
         val busy = state.droidProgress
         Toggle("Enable Linux system", state.droidEnabled && ds != null) { on ->
-            if (on) state.enableDroid() else { state.droidEnabled = false; state.save(); state.refreshLinuxApps() }
+            if (on) state.enableDroid() else state.disableDroid()
         }
         if (busy != null) {
             Text("Installing DroidSystem: ${busy.second}", color = c.text, fontSize = 13.sp)

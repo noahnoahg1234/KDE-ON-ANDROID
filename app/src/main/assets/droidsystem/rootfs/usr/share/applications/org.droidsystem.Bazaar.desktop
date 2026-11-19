@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Bazaar
+Comment=Browse and install Flatpak apps and packages
+Exec=kdx-app BAZAAR
+Terminal=false
+Categories=System;PackageManager;
+X-DroidSystem-Default=true

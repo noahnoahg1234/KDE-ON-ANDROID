@@ -1,0 +1,5 @@
+Package: rot13
+Version: 1.0
+Architecture: all
+Category: Utilities
+Description: Encode or decode text with ROT13

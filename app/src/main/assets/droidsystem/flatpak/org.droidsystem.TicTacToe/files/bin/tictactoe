@@ -1,0 +1,55 @@
+#!/system/bin/sh
+# Tic-Tac-Toe for DroidSystem
+i=1; while [ $i -le 9 ]; do eval "b$i=$i"; i=$((i + 1)); done
+cell() { eval "echo \$b$1"; }
+show() {
+  echo
+  echo " $(cell 1) | $(cell 2) | $(cell 3)"
+  echo "---+---+---"
+  echo " $(cell 4) | $(cell 5) | $(cell 6)"
+  echo "---+---+---"
+  echo " $(cell 7) | $(cell 8) | $(cell 9)"
+  echo
+}
+won() {
+  for line in "1 2 3" "4 5 6" "7 8 9" "1 4 7" "2 5 8" "3 6 9" "1 5 9" "3 5 7"; do
+    set -- $line
+    if [ "$(cell $1)" = "$4" ] && [ "$(cell $2)" = "$4" ] && [ "$(cell $3)" = "$4" ]; then return 0; fi
+  done
+  return 1
+}
+winner() { w=$1; for line in "1 2 3" "4 5 6" "7 8 9" "1 4 7" "2 5 8" "3 6 9" "1 5 9" "3 5 7"; do
+    set -- $line
+    [ "$(cell $1)" = "$w" ] && [ "$(cell $2)" = "$w" ] && [ "$(cell $3)" = "$w" ] && return 0
+  done; return 1; }
+free() { c=$(cell "$1"); [ "$c" != X ] && [ "$c" != O ]; }
+moves=0
+echo "You are X. Pick a square 1-9."
+show
+while true; do
+  echo "Your move?"
+  read -r m || exit 0
+  case "$m" in [1-9]) ;; *) echo "Enter a number from 1 to 9."; continue ;; esac
+  if ! free "$m"; then echo "That square is taken."; continue; fi
+  eval "b$m=X"; moves=$((moves + 1))
+  if winner X; then show; echo "You win!"; exit 0; fi
+  if [ $moves -ge 9 ]; then show; echo "It's a draw."; exit 0; fi
+  # computer: win, block, centre, else random
+  pick=""
+  for who in O X; do
+    for s in 1 2 3 4 5 6 7 8 9; do
+      if [ -z "$pick" ] && free $s; then
+        old=$(cell $s); eval "b$s=$who"
+        if winner $who; then pick=$s; fi
+        eval "b$s=$old"
+      fi
+    done
+  done
+  [ -z "$pick" ] && free 5 && pick=5
+  while [ -z "$pick" ]; do r=$(( (RANDOM % 9) + 1 )); free $r && pick=$r; done
+  eval "b$pick=O"; moves=$((moves + 1))
+  echo "Computer plays $pick"
+  show
+  if winner O; then echo "Computer wins!"; exit 0; fi
+  if [ $moves -ge 9 ]; then echo "It's a draw."; exit 0; fi
+done

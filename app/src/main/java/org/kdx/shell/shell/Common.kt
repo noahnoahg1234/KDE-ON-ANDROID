@@ -63,7 +63,7 @@ sealed interface Launchable {
 }
 
 fun KdxState.launchables(): List<Launchable> =
-    KApp.entries.map { Launchable.Kdx(it) } + linuxApps.map { Launchable.Linux(it) } + androidApps.map { Launchable.Droid(it) }
+    KApp.entries.filterNot { it.droidOnly }.map { Launchable.Kdx(it) } + linuxApps.map { Launchable.Linux(it) } + androidApps.map { Launchable.Droid(it) }
 
 fun KdxState.resolve(key: String): Launchable? =
     if (key.startsWith("kdx:")) runCatching { Launchable.Kdx(KApp.valueOf(key.removePrefix("kdx:"))) }.getOrNull()
@@ -73,14 +73,14 @@ fun KdxState.resolve(key: String): Launchable? =
 fun KdxState.launch(l: Launchable) = when (l) {
     is Launchable.Kdx -> open(l.app)
     is Launchable.Droid -> launch(l.app)
-    is Launchable.Linux -> open(KApp.KONSOLE, l.entry.exec)
+    is Launchable.Linux -> l.entry.kdxApp?.let { open(it) } ?: open(KApp.KONSOLE, l.entry.exec)
 }
 
 @Composable
 fun LaunchableIcon(l: Launchable, size: Dp) {
     when (l) {
         is Launchable.Kdx -> KAppIcon(l.app, size)
-        is Launchable.Linux -> Box(
+        is Launchable.Linux -> l.entry.kdxApp?.let { KAppIcon(it, size) } ?: Box(
             Modifier.size(size).clip(RoundedCornerShape(size / 4))
                 .background(if (l.entry.flatpakId != null) Color(0xFF4A86CF) else Color(0xFFE95420)),
             contentAlignment = Alignment.Center,
@@ -115,6 +115,7 @@ fun KAppIcon(app: KApp, size: Dp) {
         KApp.SYSMON -> Color(0xFFDA4453)
         KApp.INFOCENTER -> Color(0xFF2980B9)
         KApp.SETTINGS -> Color(0xFF6C7A89)
+        KApp.BAZAAR -> Color(0xFF8E44AD)
     }
     Box(
         Modifier.size(size).clip(RoundedCornerShape(size / 4)).background(tint),

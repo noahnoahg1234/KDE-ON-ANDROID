@@ -45,7 +45,12 @@ enum class KApp(
     SYSMON("System Monitor", "System Monitor", Icons.Filled.Speed, "System", "ram memory cpu battery storage ksysguard"),
     INFOCENTER("Info Center", "System Information", Icons.Filled.Info, "System", "about device hardware kinfocenter"),
     SETTINGS("System Settings", "Configure KDX", Icons.Filled.Settings, "Settings", "preferences theme wallpaper appearance desktops"),
+    /** DroidSystem's app store; listed through its .desktop entry, so only visible once DroidSystem is installed. */
+    BAZAAR("Bazaar", "App Store", Icons.Filled.Storefront, "System", "store flatpak packages install apps software"),
     ;
+
+    /** Apps that belong to DroidSystem rather than KDX itself. */
+    val droidOnly get() = this == BAZAAR
 
     val key get() = "kdx:$name"
 }
@@ -114,9 +119,30 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     var linuxApps by mutableStateOf<List<DroidSystem.DesktopEntry>>(emptyList())
         private set
 
-    /** The installed DroidSystem, or null when the Linux system is disabled / not installed. */
-    val droid: DroidSystem?
-        get() = droidRoot?.takeIf { droidEnabled }?.let { DroidSystem(ctx, File(it)) }?.takeIf { it.isInstalled }
+    /**
+     * The installed DroidSystem, or null when the Linux system is disabled / not installed. Cached and observable, so
+     * screens never touch the disk to find out; refreshed by [reloadDroid].
+     */
+    var droid by mutableStateOf<DroidSystem?>(null)
+        private set
+
+    /** Re-reads DroidSystem from disk, upgrades an older install in place, and refreshes Linux apps for Kickoff. */
+    fun reloadDroid() {
+        viewModelScope.launch {
+            val (ds, apps, migrated) = withContext(Dispatchers.IO) {
+                val d = droidRoot?.takeIf { droidEnabled }?.let { DroidSystem(ctx, File(it)) }?.takeIf { it.isInstalled }
+                val m = d?.let { runCatching { it.migrate() }.getOrDefault(false) } ?: false
+                Triple(d, d?.desktopEntries(flatpakEnabled) ?: emptyList(), m)
+            }
+            droid = ds
+            linuxApps = apps
+            if (migrated) toast("DroidSystem upgraded to ${DroidSystem.SYSTEM_VERSION} – Bazaar is now installed")
+        }
+    }
+
+    fun disableDroid() {
+        droidEnabled = false; save(); reloadDroid()
+    }
 
     /** Where a new DroidSystem goes: the phone's storage when KDX has file access, else KDX's private folder. */
     fun droidTargetDir(): File =
@@ -125,7 +151,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     fun enableDroid() {
         if (droidProgress != null) return
         val existing = droidRoot?.let { DroidSystem(ctx, File(it)) }?.takeIf { it.isInstalled }
-        if (existing != null) { droidEnabled = true; save(); refreshLinuxApps(); return }
+        if (existing != null) { droidEnabled = true; save(); reloadDroid(); return }
         installDroid(droidTargetDir())
     }
 
@@ -138,7 +164,8 @@ class KdxState(app: Application) : AndroidViewModel(app) {
             }
             droidProgress = null
             r.onSuccess {
-                droidRoot = dir.path; droidEnabled = true; save(); refreshLinuxApps()
+                droidRoot = dir.path; droidEnabled = true; save()
+                droid = ds; linuxApps = withContext(Dispatchers.IO) { ds.desktopEntries(flatpakEnabled) }
                 toast("DroidSystem installed in ${dir.path}")
             }.onFailure { toast("DroidSystem install failed: ${it.message}") }
         }
@@ -148,7 +175,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         val dir = droidRoot?.let { File(it) } ?: return
         viewModelScope.launch {
             withContext(Dispatchers.IO) { DroidSystem(ctx, dir).uninstall() }
-            droidEnabled = false; droidRoot = null; linuxApps = emptyList(); save()
+            droidEnabled = false; droidRoot = null; droid = null; linuxApps = emptyList(); save()
             toast("DroidSystem removed")
         }
     }
@@ -206,7 +233,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
 
     init {
         reloadApps()
-        refreshLinuxApps()
+        reloadDroid()
     }
 
     fun reloadApps() {
@@ -239,7 +266,8 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     fun open(app: KApp, arg: String? = null) {
         closeMenus()
         // Single-instance apps are focused instead of duplicated.
-        if (app in setOf(KApp.SETTINGS, KApp.KLIPPER, KApp.SYSMON, KApp.INFOCENTER, KApp.KNOTES)) {
+        if (app.droidOnly && droid == null) { toast("Enable the Linux system (DroidSystem) in System Settings to use ${app.title}"); return }
+        if (app in setOf(KApp.SETTINGS, KApp.KLIPPER, KApp.SYSMON, KApp.INFOCENTER, KApp.KNOTES, KApp.BAZAAR)) {
             windows.firstOrNull { it.app == app }?.let {
                 it.desktop = currentDesktop
                 focus(it)

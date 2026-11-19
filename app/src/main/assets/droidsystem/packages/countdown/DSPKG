@@ -1,4 +1,5 @@
 Package: countdown
 Version: 1.0
 Architecture: all
+Category: Utilities
 Description: Counts down N seconds, then rings the bell

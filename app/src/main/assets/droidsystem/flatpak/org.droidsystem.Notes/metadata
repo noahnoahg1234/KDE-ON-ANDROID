@@ -6,3 +6,9 @@ command=notes
 
 [Context]
 filesystems=home;
+
+[X-DroidHub]
+version=1.0
+category=Office
+developer=DroidSystem Project
+description=Jot down timestamped one-line notes from the terminal. Notes are kept in notes.txt in your DroidSystem home folder.

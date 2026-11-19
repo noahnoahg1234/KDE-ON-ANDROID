@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Password Generator
+Comment=Create strong random passwords
+Exec=flatpak run org.droidsystem.PassGen
+Terminal=true
+Categories=Utilities;
+X-Flatpak=org.droidsystem.PassGen

@@ -1,0 +1,5 @@
+Package: colors
+Version: 1.0
+Architecture: all
+Category: System
+Description: Shows the terminal's colour palette

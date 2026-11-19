@@ -1,0 +1,31 @@
+#!/system/bin/sh
+# Hangman for DroidSystem
+set -- kernel terminal package desktop window folder battery android penguin garden river mountain thunder planet galaxy keyboard
+n=$(( (RANDOM % $#) + 1 ))
+eval "word=\${$n}"
+guessed=""
+lives=6
+len=${#word}
+reveal() {
+  out=""; i=1; done_=1
+  while [ $i -le $len ]; do
+    ch=$(printf '%s' "$word" | cut -c$i)
+    case "$guessed" in *"$ch"*) out="$out$ch " ;; *) out="${out}_ "; done_=0 ;; esac
+    i=$((i + 1))
+  done
+  echo "$out"
+  [ $done_ -eq 1 ]
+}
+echo "Hangman: guess the $len-letter word."
+while true; do
+  if reveal; then echo "You solved it: $word"; exit 0; fi
+  echo "Lives: $lives   Guessed: $guessed"
+  echo "Letter?"
+  read -r g || exit 0
+  g=$(printf '%s' "$g" | tr 'A-Z' 'a-z' | cut -c1)
+  case "$g" in [a-z]) ;; *) echo "Type a letter."; continue ;; esac
+  case "$guessed" in *"$g"*) echo "Already tried $g."; continue ;; esac
+  guessed="$guessed$g"
+  case "$word" in *"$g"*) echo "Yes!" ;; *) lives=$((lives - 1)); echo "No $g."
+    if [ $lives -le 0 ]; then echo "Out of lives! The word was: $word"; exit 0; fi ;; esac
+done

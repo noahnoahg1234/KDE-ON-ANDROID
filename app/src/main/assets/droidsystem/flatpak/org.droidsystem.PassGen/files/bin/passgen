@@ -1,0 +1,10 @@
+#!/system/bin/sh
+len=20; set_='A-Za-z0-9!@#%^&*_+=?'
+for a in "$@"; do
+  case "$a" in --simple) set_='A-Za-z0-9' ;; *[!0-9]*|'') ;; *) len=$a ;; esac
+done
+i=0
+while [ $i -lt 5 ]; do
+  LC_ALL=C tr -dc "$set_" < /dev/urandom | head -c "$len"; echo
+  i=$((i + 1))
+done

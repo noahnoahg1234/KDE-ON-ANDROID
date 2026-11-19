@@ -1,0 +1,7 @@
+#!/system/bin/sh
+[ $# -eq 0 ] && { echo "usage: wordcount FILE..."; exit 1; }
+for f in "$@"; do
+  [ -f "$f" ] || { echo "$f: not a file"; continue; }
+  set -- $(wc -lwc < "$f")
+  echo "$f: $1 lines, $2 words, $3 characters"
+done

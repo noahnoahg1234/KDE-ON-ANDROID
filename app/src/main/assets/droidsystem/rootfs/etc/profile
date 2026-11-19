@@ -1,3 +1,4 @@
-# DroidSystem login profile
-export PS1='\u@\h:\w\$ '
-export EDITOR=kate
+# DroidSystem profile – sourced before every command in Konsole.
+ll() { ls -l "$@"; }
+la() { ls -la "$@"; }
+cls() { clear; }

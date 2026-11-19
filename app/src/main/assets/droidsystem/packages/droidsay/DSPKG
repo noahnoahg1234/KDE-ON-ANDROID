@@ -1,4 +1,5 @@
 Package: droidsay
 Version: 1.0
 Architecture: all
+Category: Fun
 Description: A friendly robot that repeats what you say

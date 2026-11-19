@@ -9,15 +9,19 @@ import java.io.File
 object DroidShell {
     val help = listOf(
         "DroidSystem commands:",
+        "  bazaar                        open the Bazaar app store",
         "  dsfetch                       system information",
-        "  dspkg update|list|search|show|install|remove|build   package manager",
+        "  dspkg update|upgrade|list|search|show|install|remove|build",
+        "        install accepts names, .deb, .rpm, .pkg.tar.{gz,xz} and .dsp files",
         "  apt / apt-get                 aliases for dspkg",
-        "  flatpak list|remote-ls|search|info|install|uninstall|run|remotes",
+        "  flatpak list|remote-ls|search|info|install|uninstall|run|update",
+        "          remotes|remote-add FILE.flatpakrepo|remote-delete NAME",
         "  run-desktop <file.desktop>    launch a .desktop entry",
-        "  extract <archive> [dir]       unpack zip / tar / tar.gz / tar.xz / tar.bz2",
+        "  extract <archive> [dir]       zip jar 7z tar tar.gz/xz/bz2 gz xz bz2 cpio ar",
         "  linuxinfo <file>              identify Linux binaries, AppImages, packages",
         "  droidsystem                   version and install location",
-        "Installed commands in /usr/bin run by name (e.g. 'fortune').",
+        "Installed commands run by name and work in pipes: fortune | droidsay",
+        "Built-ins can be piped too: dspkg list | grep game",
     )
 
     /** Splits a command line, honouring single and double quotes. */
@@ -48,12 +52,42 @@ object DroidShell {
         else -> File(s.cwd, p)
     }
 
+    private val builtins = setOf(
+        "dsfetch", "neofetch", "droidsystem", "dspkg", "apt", "apt-get", "flatpak", "run-desktop", "extract",
+        "linuxinfo", "file", "bazaar", "kdx-app",
+    )
+
+    /** Index of the first unquoted '|' that is not part of '||', or -1. */
+    private fun pipeIndex(line: String): Int {
+        var q: Char? = null
+        line.forEachIndexed { i, ch ->
+            when {
+                q != null -> if (ch == q) q = null
+                ch == '"' || ch == '\'' -> q = ch
+                ch == '|' && line.getOrNull(i + 1) != '|' && line.getOrNull(i - 1) != '|' -> return i
+            }
+        }
+        return -1
+    }
+
     /** Returns true if the command was a DroidSystem command (handled here). */
     fun handle(s: KonsoleSession, state: KdxState, ds: DroidSystem, line: String): Boolean {
         val argv = split(line)
         if (argv.isEmpty()) return false
         val args = argv.drop(1)
+        // `builtin … | shell pipeline`: capture the builtin's output and feed it to the rest.
+        val pipe = pipeIndex(line)
+        if (argv[0] in builtins && pipe > 0) {
+            val captured = mutableListOf<String>()
+            s.capture = captured
+            try { handle(s, state, ds, line.substring(0, pipe)) } finally { s.capture = null }
+            s.exec(line.substring(pipe + 1), captured.joinToString("\n", postfix = "\n"))
+            return true
+        }
         when (argv[0]) {
+            "bazaar" -> state.open(org.kdx.shell.core.KApp.BAZAAR)
+            "kdx-app" -> runCatching { state.open(org.kdx.shell.core.KApp.valueOf(args.first().uppercase())) }
+                .onFailure { s.println("kdx-app: unknown app ${args.firstOrNull() ?: ""}", 2) }
             "dsfetch", "neofetch" -> dsfetch(s, state, ds)
             "droidsystem" -> {
                 s.println(ds.version); s.println("Root: ${ds.root.path}")
@@ -94,9 +128,10 @@ object DroidShell {
                     s.exec("sh ${quote(f.path)} ${args.joinToString(" ") { quote(it) }}")
                     return true
                 }
-                val bin = ds.which(cmd) ?: return false
-                if (DroidSystem.isElf(bin)) { DroidSystem.describe(bin).drop(2).forEach { s.println(it, 2) }; return true }
-                s.exec("sh ${quote(bin.path)} ${args.joinToString(" ") { quote(it) }}")
+                val bin = ds.which(cmd)
+                if (bin != null && DroidSystem.isElf(bin)) { DroidSystem.describe(bin).drop(2).forEach { s.println(it, 2) }; return true }
+                // Installed commands are shell functions in the preamble, so pipes, ;, && etc. all work.
+                s.exec(line)
             }
         }
         return true
@@ -147,7 +182,11 @@ object DroidShell {
                 s.println("Hit:1 main (bundled with KDX, offline) – ${ds.available().size} packages")
                 s.println("Reading package lists… Done")
             }
-            "upgrade" -> s.println("All packages are up to date.")
+            "upgrade", "dist-upgrade", "full-upgrade" -> s.background { log ->
+                val up = ds.upgrade(log)
+                log(if (up.isEmpty()) "All packages are up to date." else "Upgraded: ${up.joinToString()}")
+                state.refreshLinuxApps()
+            }
             "list" -> {
                 val inst = ds.installed().associateBy { it.name }
                 val list = when {
@@ -177,7 +216,9 @@ object DroidShell {
                             when {
                                 f.isFile && f.extension.equals("deb", true) -> ds.installDeb(f, log)
                                 f.isFile && f.extension.equals("dsp", true) -> ds.installDsp(f, log)
-                                f.isFile -> throw java.io.IOException("${f.name}: unsupported package type (use .deb or .dsp)")
+                                f.isFile && f.extension.equals("rpm", true) -> ds.installRpm(f, log)
+                                f.isFile && f.name.contains(".pkg.tar") -> ds.installArch(f, log)
+                                f.isFile -> throw java.io.IOException("${f.name}: unsupported package type (use .deb, .rpm, .pkg.tar.* or .dsp)")
                                 ds.isPkgInstalled(target) -> log("$target is already the newest version.")
                                 else -> ds.installFromRepo(target, log)
                             }
@@ -213,7 +254,26 @@ object DroidShell {
                 "  info ID | run ID [ARGS] | uninstall ID",
             ).forEach { s.println(it) }
             "--version" -> s.println("Flatpak (DroidSystem implementation) 1.0")
-            "remotes" -> { s.println("Name      Options"); s.println("droidhub  system,offline (bundled with KDX)") }
+            "remotes" -> {
+                s.println("%-12s %s".format("Name", "Options / URL"))
+                s.println("%-12s %s".format("droidhub", "system,offline (bundled with KDX)"))
+                ds.flatpakRemotes().filter { it.first != "droidhub" }.forEach { (n, u) -> s.println("%-12s %s".format(n, "$u (offline – not fetched)")) }
+            }
+            "remote-add" -> {
+                val f = rest.lastOrNull()?.let { file(s, it) } ?: return run { s.println("usage: flatpak remote-add FILE.flatpakrepo", 2) }
+                runCatching { ds.flatpakRemoteAdd(f, rest.takeIf { it.size > 1 }?.first()) }
+                    .onSuccess { s.println("Added remote '$it'. DroidSystem never downloads, so only build directories can be installed from it.") }
+                    .onFailure { s.println("error: ${it.message}", 2) }
+            }
+            "remote-delete" -> {
+                val n = rest.firstOrNull() ?: return
+                if (n == "droidhub") s.println("error: droidhub is built in", 2)
+                else s.println(if (File(ds.root, "etc/flatpak/remotes.d/$n.flatpakrepo").delete()) "Removed remote $n" else "error: no remote $n", 0)
+            }
+            "update" -> s.background { log ->
+                val up = ds.upgrade(log).filter { it.contains('.') }
+                log(if (up.isEmpty()) "Nothing to do." else "Updated: ${up.joinToString()}")
+            }
             "remote-ls", "search" -> {
                 val q = if (sub == "search") rest.joinToString(" ") else ""
                 val installed = ds.flatpakInstalled().map { it.id }.toSet()
@@ -246,6 +306,7 @@ object DroidShell {
                                         "install the app's build directory instead."
                                 )
                             }
+                            f.exists() && f.name.endsWith(".flatpakrepo") -> log("Added remote '${ds.flatpakRemoteAdd(f)}'.")
                             f.exists() && f.name.endsWith(".flatpak") -> throw java.io.IOException(
                                 "Single-file .flatpak bundles use OSTree, which DroidSystem doesn't support. Install a build directory (metadata + files/) instead."
                             )

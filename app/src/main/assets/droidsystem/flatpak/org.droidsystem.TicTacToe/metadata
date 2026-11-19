@@ -1,0 +1,14 @@
+[Application]
+name=org.droidsystem.TicTacToe
+runtime=org.droidsystem.Platform/aarch64/1.1
+sdk=org.droidsystem.Sdk/aarch64/1.1
+command=tictactoe
+
+[Context]
+filesystems=home;
+
+[X-DroidHub]
+version=1.0
+category=Games
+developer=DroidSystem Project
+description=Three in a row wins. You play X, the computer plays O. Enter a square number from 1 to 9 on each turn.

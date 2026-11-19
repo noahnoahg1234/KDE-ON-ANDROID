@@ -1,0 +1,14 @@
+[Application]
+name=org.droidsystem.PassGen
+runtime=org.droidsystem.Platform/aarch64/1.1
+sdk=org.droidsystem.Sdk/aarch64/1.1
+command=passgen
+
+[Context]
+filesystems=home;
+
+[X-DroidHub]
+version=1.0
+category=Utilities
+developer=DroidSystem Project
+description=Generates random passwords from the system's secure random source. Pass a length, e.g. passgen 24, and optionally --simple for letters and digits only.

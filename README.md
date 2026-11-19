@@ -42,21 +42,32 @@ Turn it on in **System Settings → Linux System (DroidSystem)**. KDX installs *
 system, into a `DroidSystem/` folder on your phone (or KDX's private folder if file access hasn't been granted).
 DroidSystem is written for KDX and bundled inside the APK (`app/src/main/assets/droidsystem`), so **nothing is downloaded**.
 
-| Settings | dsfetch | Flatpak |
-|---|---|---|
-| ![](docs/screenshots/droidsystem-settings.jpg) | ![](docs/screenshots/droidsystem-dsfetch.jpg) | ![](docs/screenshots/droidsystem-flatpak.jpg) |
+| Settings | Bazaar | App page | dsfetch |
+|---|---|---|---|
+| ![](docs/screenshots/droidsystem-settings.jpg) | ![](docs/screenshots/bazaar-explore.jpg) | ![](docs/screenshots/bazaar-detail.jpg) | ![](docs/screenshots/droidsystem-dsfetch.jpg) |
+
+- **Bazaar** (installed by default): a graphical app store with Explore (featured app and categories), Installed and
+  Updates tabs, search, app pages with version/source/permissions, and one-tap Install / Open / Remove / Update for
+  Flatpaks and dspkg packages. Open it from Kickoff or type `bazaar` in Konsole.
 
 - **File system**: `etc/` (os-release, passwd, motd, profile), `home/user`, `usr/bin`, `usr/share/applications`, `var/lib/{dspkg,flatpak}`, …
 - **Konsole becomes a DroidSystem shell** (`user@droidsystem:~$`) with `dsfetch`, `droidsystem`, `extract`, `linuxinfo`, `run-desktop`.
 - **dspkg** package manager (`apt`/`apt-get` work as aliases): `update`, `list`, `search`, `show`, `install`, `remove`, `build`.
-  - Offline *main* repo: `droidsay`, `fortune`, `tree`, `todo`, `sysinfo`, `countdown`
-  - Installs real Debian **.deb** files (ar + tar.gz/xz/bz2) and DroidSystem's own **.dsp** packages (`dspkg build DIR` creates one)
+  - Offline *main* repo: `droidsay`, `fortune`, `tree`, `todo`, `sysinfo`, `countdown`, `cheat`, `rot13`, `wordcount`, `colors`
+  - Installs Debian **.deb**, Fedora/openSUSE **.rpm**, Arch **.pkg.tar.{gz,xz}** and DroidSystem's own **.dsp** packages
+    (`dspkg build DIR` creates one); `dspkg upgrade` updates to the bundled versions
 - **Flatpak**: `flatpak list | remotes | remote-ls | search | info | install | uninstall | run`. It installs Flatpak build
   directories (`metadata` + `files/`, as a folder, .zip or .tar.*) and `.flatpakref` files that point at the offline **DroidHub**
-  remote: Welcome Tour, Dice, Number Guess, World Clock, Quick Notes.
+  remote: Welcome Tour, Dice, Number Guess, Tic-Tac-Toe, Hangman, Password Generator, World Clock, Quick Notes.
+  `.flatpakrepo` files can be added with `flatpak remote-add`.
+- **A better shell**: installed commands are shell functions, so pipes and scripts work (`fortune | droidsay`), and
+  built-ins pipe too (`dspkg list | grep game`). Konsole shows prompts that don't end in a newline, handles `\r` progress
+  lines, and renders ANSI colours (try `colors`). An older DroidSystem upgrades itself automatically.
 - **Linux apps in Kickoff**: `.desktop` launchers from packages and Flatpaks appear under **Applications → Linux**.
-- **Linux file types in Dolphin**: `.deb`/`.dsp` install, `.flatpakref` installs, `.desktop` launches, `.sh` runs,
-  `.tar.*`/`.zip` extract, and `.AppImage`/ELF/`.rpm` are identified. Folders with a `metadata` file get *Install as Flatpak*.
+- **Linux file types in Dolphin**: `.deb`/`.rpm`/`.pkg.tar.*`/`.dsp` install, `.flatpakref`/`.flatpakrepo` install,
+  `.desktop` launches, `.sh` runs, `.tar.*`/`.zip`/`.7z`/`.jar`/`.gz`/`.xz`/`.bz2`/`.cpio` extract, and
+  `.AppImage`/ELF/`.so`/`.ko`/`.iso`/`.img`/squashfs files are identified by their contents. Linux config and source files
+  (`.service`, `.spec`, `.patch`, `PKGBUILD`, `Makefile`, …) open in Kate. Folders with a `metadata` file get *Install as Flatpak*.
 
 **Android limit:** Android does not let apps execute downloaded native Linux programs (W^X policy, and there is no glibc).
 Packages and Flatpaks containing desktop-Linux binaries can be installed and inspected, but only script-based apps

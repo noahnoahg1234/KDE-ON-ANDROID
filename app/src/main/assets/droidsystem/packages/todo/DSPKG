@@ -1,4 +1,5 @@
 Package: todo
 Version: 1.0
 Architecture: all
+Category: Office
 Description: A tiny to-do list for the terminal

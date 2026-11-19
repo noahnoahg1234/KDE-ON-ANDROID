@@ -1,4 +1,5 @@
 Package: sysinfo
 Version: 1.0
 Architecture: all
+Category: System
 Description: Summary of the Android kernel, memory and storage

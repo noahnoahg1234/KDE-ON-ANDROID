@@ -1,0 +1,5 @@
+Package: cheat
+Version: 1.0
+Architecture: all
+Category: Development
+Description: Offline cheat sheets for common shell commands

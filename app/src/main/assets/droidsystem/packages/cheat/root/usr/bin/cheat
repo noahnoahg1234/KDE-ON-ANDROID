@@ -1,0 +1,10 @@
+#!/system/bin/sh
+case "$1" in
+  ls) printf '%s\n' "ls -l      long listing" "ls -a      include hidden files" "ls -lh     human-readable sizes" "ls -t      newest first" ;;
+  find) printf '%s\n' "find . -name '*.txt'       by name" "find . -type d             only folders" "find . -size +10M          bigger than 10 MiB" "find . -mtime -1           changed in last day" ;;
+  grep) printf '%s\n' "grep -i word file          ignore case" "grep -r word dir           recursive" "grep -n word file          show line numbers" "grep -v word file          lines NOT matching" ;;
+  tar) printf '%s\n' "tar -czf out.tar.gz dir    create gzip archive" "tar -xzf in.tar.gz         extract" "tar -tf in.tar             list contents" "(or just: extract FILE)" ;;
+  dspkg|apt) printf '%s\n' "dspkg list --available     browse packages" "dspkg install NAME|FILE    install" "dspkg remove NAME          uninstall" "dspkg upgrade              update to bundled versions" ;;
+  flatpak) printf '%s\n' "flatpak remote-ls          browse DroidHub" "flatpak install ID         install" "flatpak run ID             start an app" "flatpak list               installed apps" ;;
+  *) echo "usage: cheat TOPIC"; echo "topics: ls find grep tar dspkg flatpak" ;;
+esac

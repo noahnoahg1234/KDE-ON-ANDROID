@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.onFirst
 import androidx.lifecycle.ViewModelProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -122,6 +123,23 @@ class ShellScreenshotTest {
         rule.onNodeWithText("Welcome Tour").assertExists()
         rule.runOnUiThread { state.closeMenus(); state.open(KApp.DOLPHIN, dir.path) }
         shot("44-dolphin-droidsystem")
+        // Bazaar is installed by default
+        assertTrue(state.linuxApps.any { it.name == "Bazaar" })
+        rule.runOnUiThread { state.windows.toList().forEach { state.close(it) }; state.open(KApp.BAZAAR) }
+        var t = 0
+        while (t++ < 60) { rule.mainClock.advanceTimeBy(50); org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); Thread.sleep(30) }
+        shot("45-bazaar-explore")
+        rule.onAllNodes(androidx.compose.ui.test.hasSetTextAction()).onLast().performTextInput("tic")
+        rule.mainClock.advanceTimeBy(200)
+        rule.onAllNodes(androidx.compose.ui.test.hasText("Tic-Tac-Toe")).onFirst().performClick()
+        shot("46-bazaar-detail")
+        rule.onNodeWithText("Install").performClick()
+        t = 0
+        while (!state.droid!!.flatpakInstalled().any { it.id == "org.droidsystem.TicTacToe" } && t++ < 100) {
+            rule.mainClock.advanceTimeBy(50); org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); Thread.sleep(30)
+        }
+        assertTrue("Bazaar installs apps", state.droid!!.flatpakInstalled().any { it.id == "org.droidsystem.TicTacToe" })
+        shot("47-bazaar-installed")
     }
 
     @Test fun konsoleRunsCommands() {

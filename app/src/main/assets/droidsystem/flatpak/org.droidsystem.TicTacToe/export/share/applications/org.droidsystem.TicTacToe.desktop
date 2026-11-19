@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Tic-Tac-Toe
+Comment=Play noughts and crosses against the computer
+Exec=flatpak run org.droidsystem.TicTacToe
+Terminal=true
+Categories=Games;
+X-Flatpak=org.droidsystem.TicTacToe

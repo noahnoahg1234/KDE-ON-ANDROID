@@ -1,0 +1,5 @@
+Package: wordcount
+Version: 1.0
+Architecture: all
+Category: Office
+Description: Count lines, words and characters in text files

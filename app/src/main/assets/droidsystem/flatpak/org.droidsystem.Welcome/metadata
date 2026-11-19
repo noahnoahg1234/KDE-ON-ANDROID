@@ -6,3 +6,9 @@ command=welcome
 
 [Context]
 filesystems=home;
+
+[X-DroidHub]
+version=1.0
+category=Education
+developer=DroidSystem Project
+description=A short interactive tour that explains where DroidSystem keeps its files and how to install apps with Bazaar, dspkg and flatpak.

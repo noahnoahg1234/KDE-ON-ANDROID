@@ -6,3 +6,9 @@ command=worldclock
 
 [Context]
 filesystems=home;
+
+[X-DroidHub]
+version=1.0
+category=Utilities
+developer=DroidSystem Project
+description=See the current time in seven major cities at a glance, using the time zone database built into Android.

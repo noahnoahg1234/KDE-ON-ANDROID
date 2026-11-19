@@ -75,10 +75,15 @@ class DolphinSession(start: File) {
 private val textExt = setOf(
     "txt", "md", "log", "json", "xml", "html", "htm", "css", "js", "ts", "kt", "kts", "java", "c", "h", "cpp", "hpp",
     "py", "sh", "rs", "go", "yml", "yaml", "toml", "ini", "conf", "cfg", "csv", "properties", "gradle", "sql", "rc", "desktop",
+    // Linux/system config and source types
+    "service", "socket", "timer", "target", "mount", "rules", "repo", "list", "spec", "patch", "diff", "cmake", "nix",
+    "lua", "rb", "pl", "pm", "php", "bash", "zsh", "fish", "ksh", "env", "lock", "tf", "hcl", "dockerfile", "mk", "am", "in",
+    "flatpakref", "flatpakrepo", "metainfo", "appdata", "rst", "tex", "srt", "vtt", "org", "adoc", "jsonc", "json5", "svg",
 )
+private val textNames = setOf("makefile", "dockerfile", "pkgbuild", "dspkg", "readme", "license", "copying", "changelog", "metadata", "control", "fstab", "hosts", "passwd", "profile")
 private val imageExt = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp", "heic", "heif")
 
-fun File.isTextFile() = extension.lowercase() in textExt || (extension.isEmpty() && length() < 512 * 1024)
+fun File.isTextFile() = extension.lowercase() in textExt || name.lowercase() in textNames || (extension.isEmpty() && length() < 512 * 1024)
 fun File.isImageFile() = extension.lowercase() in imageExt
 
 fun humanSize(bytes: Long): String {
@@ -90,18 +95,21 @@ fun humanSize(bytes: Long): String {
     return "%.1f %s".format(v, units[i])
 }
 
-private val archiveRe = Regex(".*\\.(tar|tar\\.gz|tgz|tar\\.xz|txz|tar\\.bz2|tbz2|zip)$", RegexOption.IGNORE_CASE)
+private val archiveRe = Regex(".*\\.(tar|tar\\.gz|tgz|tar\\.xz|txz|tar\\.bz2|tbz2|zip|7z|jar|cpio|gz|xz|bz2)$", RegexOption.IGNORE_CASE)
 fun File.isArchive() = archiveRe.matches(name)
 
 /** The DroidSystem command that handles a Linux file type, or null for normal handling. */
 fun linuxCommand(f: File): String? {
     val q = org.kdx.shell.droid.DroidShell.quote(f.path)
+    val n = f.name.lowercase()
+    if (n.contains(".pkg.tar.")) return "dspkg install $q"
     return when (f.extension.lowercase()) {
         "desktop" -> "run-desktop $q"
-        "sh", "bash" -> "sh $q"
-        "deb", "dsp" -> "dspkg install $q"
-        "flatpakref", "flatpak" -> "flatpak install $q"
-        "appimage", "rpm", "snap", "so", "elf", "bin", "run" -> "linuxinfo $q"
+        "sh", "bash", "ksh", "zsh" -> "sh $q"
+        "deb", "dsp", "rpm" -> "dspkg install $q"
+        "flatpakref", "flatpak", "flatpakrepo" -> "flatpak install $q"
+        "appimage", "snap", "so", "elf", "bin", "run", "ko", "iso", "img", "squashfs", "sfs", "a", "o" -> "linuxinfo $q"
+        "7z", "gz", "xz", "bz2", "cpio", "jar", "war", "zst", "lz4" -> "extract $q"
         else -> when {
             f.isArchive() -> "extract $q"
             f.length() in 4..(512L * 1024 * 1024) && org.kdx.shell.droid.DroidSystem.isElf(f) -> "linuxinfo $q"
@@ -113,8 +121,11 @@ fun linuxCommand(f: File): String? {
 private fun iconFor(f: File): ImageVector = when {
     f.isDirectory && File(f, "metadata").isFile && File(f, "files").isDirectory -> Icons.Filled.Inventory2
     f.isDirectory -> Icons.Filled.Folder
-    f.extension.lowercase() in setOf("deb", "dsp", "rpm", "snap") -> Icons.Filled.Inventory2
-    f.extension.lowercase() in setOf("flatpak", "flatpakref") -> Icons.Filled.Widgets
+    f.extension.lowercase() in setOf("deb", "dsp", "rpm", "snap") || f.name.contains(".pkg.tar.") -> Icons.Filled.Inventory2
+    f.extension.lowercase() in setOf("flatpak", "flatpakref", "flatpakrepo") -> Icons.Filled.Widgets
+    f.extension.lowercase() in setOf("iso", "img", "squashfs", "sfs") -> Icons.Filled.Album
+    f.extension.lowercase() in setOf("so", "ko", "a", "o") -> Icons.Filled.Memory
+    f.extension.lowercase() in setOf("7z", "jar", "cpio", "gz", "xz", "bz2") -> Icons.Filled.FolderZip
     f.extension.lowercase() == "desktop" -> Icons.Filled.RocketLaunch
     f.extension.lowercase() in setOf("sh", "bash") -> Icons.Filled.Terminal
     f.extension.lowercase() == "appimage" -> Icons.Filled.Memory

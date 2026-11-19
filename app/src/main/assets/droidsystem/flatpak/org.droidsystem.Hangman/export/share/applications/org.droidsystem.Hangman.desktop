@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Hangman
+Comment=Guess the word one letter at a time
+Exec=flatpak run org.droidsystem.Hangman
+Terminal=true
+Categories=Games;
+X-Flatpak=org.droidsystem.Hangman

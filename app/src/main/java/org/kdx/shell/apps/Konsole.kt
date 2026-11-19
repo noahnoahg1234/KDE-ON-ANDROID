@@ -28,6 +28,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.withStyle
 import kotlinx.coroutines.*
 import org.kdx.shell.core.KApp
 import org.kdx.shell.core.KWindow
@@ -38,7 +39,66 @@ import java.io.Closeable
 import java.io.File
 import java.io.OutputStreamWriter
 
-private val ansi = Regex("\u001B\\[[0-9;?]*[ -/]*[@-~]")
+/** Escape sequences we can't render (cursor movement etc.); SGR colour codes ("…m") are kept. */
+private val ansi = Regex("\u001B\\[[0-9;?]*[ -/]*[@-ln-~]|\u001B\\][^\u0007\u001B]*(\u0007|\u001B\\\\)|\u001B[()][A-Z0-9]|\u001B[=>]")
+private val sgr = Regex("\u001B\\[([0-9;]*)m")
+
+private val ansiColors = listOf(
+    0xFF232627, 0xFFED1515, 0xFF11D116, 0xFFF67400, 0xFF1D99F3, 0xFF9B59B6, 0xFF1ABC9C, 0xFFFCFCFC,
+    0xFF7F8C8D, 0xFFFF5555, 0xFF1CDC9A, 0xFFFDBC4B, 0xFF3DAEE9, 0xFFC061CB, 0xFF16A085, 0xFFFFFFFF,
+).map { Color(it) }
+
+/** Turns text containing ANSI SGR codes into styled text (16 colours, bold, underline, reverse). */
+fun ansiToAnnotated(text: String, base: Color): androidx.compose.ui.text.AnnotatedString {
+    if (!text.contains('\u001B')) return androidx.compose.ui.text.AnnotatedString(text)
+    return androidx.compose.ui.text.buildAnnotatedString {
+        var fg: Color? = null; var bgc: Color? = null; var bold = false; var underline = false; var reverse = false
+        var pos = 0
+        fun flush(end: Int) {
+            if (end <= pos) return
+            val f = if (reverse) (bgc ?: Color(0xFF232627)) else fg
+            val b = if (reverse) (fg ?: base) else bgc
+            withStyle(androidx.compose.ui.text.SpanStyle(
+                color = f ?: Color.Unspecified, background = b ?: Color.Unspecified,
+                fontWeight = if (bold) androidx.compose.ui.text.font.FontWeight.Bold else null,
+                textDecoration = if (underline) androidx.compose.ui.text.style.TextDecoration.Underline else null,
+            )) { append(text.substring(pos, end)) }
+        }
+        sgr.findAll(text).forEach { m ->
+            flush(m.range.first)
+            val codes = m.groupValues[1].split(';').map { it.toIntOrNull() ?: 0 }
+            var i = 0
+            while (i < codes.size) {
+                when (val c = codes[i]) {
+                    0 -> { fg = null; bgc = null; bold = false; underline = false; reverse = false }
+                    1 -> bold = true
+                    4 -> underline = true
+                    7 -> reverse = true
+                    22 -> bold = false
+                    24 -> underline = false
+                    27 -> reverse = false
+                    in 30..37 -> fg = ansiColors[c - 30]
+                    39 -> fg = null
+                    in 40..47 -> bgc = ansiColors[c - 40]
+                    49 -> bgc = null
+                    in 90..97 -> fg = ansiColors[c - 90 + 8]
+                    in 100..107 -> bgc = ansiColors[c - 100 + 8]
+                    38, 48 -> { // 256-colour: map to nearest of the 16
+                        if (codes.getOrNull(i + 1) == 5) {
+                            val v = codes.getOrNull(i + 2) ?: 7
+                            val col = ansiColors[if (v < 16) v else 7]
+                            if (c == 38) fg = col else bgc = col
+                            i += 2
+                        }
+                    }
+                }
+                i++
+            }
+            pos = m.range.last + 1
+        }
+        flush(text.length)
+    }
+}
 
 class KonsoleSession(start: File, private val env: Map<String, String>, val droid: DroidSystem? = null) : Closeable {
     private var stateRef: KdxState? = null
@@ -73,7 +133,13 @@ class KonsoleSession(start: File, private val env: Map<String, String>, val droi
         return "${cwd.path.replace(Regex("^/storage/emulated/0"), "~")} \$"
     }
 
-    fun println(text: String, kind: Int = 0) { lines += text to kind }
+    /** When set, println output is collected here instead of shown (for `builtin | pipeline`). */
+    var capture: MutableList<String>? = null
+
+    fun println(text: String, kind: Int = 0) {
+        capture?.let { it += text; return }
+        lines += text to kind
+    }
 
     /** Runs a command line as if typed (used by .desktop launchers). */
     fun submitLine(cmd: String) { stateRef?.let { input = cmd; submit(it) } }
@@ -100,8 +166,12 @@ class KonsoleSession(start: File, private val env: Map<String, String>, val droi
         histIdx = -1
         val p = running
         if (p != null) {
-            // Feed the running process's stdin.
-            lines += cmd to 1
+            // Feed the running process's stdin, echoing after its prompt like a real terminal.
+            if (partialActive && lines.isNotEmpty()) {
+                val (text, kind) = lines[lines.lastIndex]
+                lines[lines.lastIndex] = "$text\u001B[92m$cmd\u001B[0m" to kind
+                partialActive = false
+            } else lines += cmd to 1
             runCatching { stdin?.apply { write(cmd + "\n"); flush() } }
             return
         }
@@ -154,33 +224,51 @@ class KonsoleSession(start: File, private val env: Map<String, String>, val droi
         }
     }
 
-    fun exec(cmd: String) {
-        val pb = ProcessBuilder("/system/bin/sh", "-c", cmd).directory(cwd).redirectErrorStream(true)
+    /** True while the last line is an unfinished line of program output (e.g. a prompt without newline). */
+    private var partialActive = false
+
+    /**
+     * Runs [cmd] with /system/bin/sh. In DroidSystem mode the command is prefixed with the system's shell preamble
+     * (profile + a function per installed command) so DroidSystem commands also work in pipes and scripts.
+     * [stdinData], if given, is fed to the process and its stdin closed (used for `builtin | command`).
+     */
+    fun exec(cmd: String, stdinData: String? = null) {
+        val full = droid?.let { (runCatching { it.shellPreamble() }.getOrDefault("")) + cmd } ?: cmd
+        val pb = ProcessBuilder("/system/bin/sh", "-c", full).directory(cwd).redirectErrorStream(true)
         pb.environment().putAll(env)
         val proc = runCatching { pb.start() }.getOrElse {
             lines += "konsole: ${it.message}" to 2; return
         }
         running = proc
-        stdin = OutputStreamWriter(proc.outputStream)
+        if (stdinData != null) {
+            stdin = null
+            scope.launch(Dispatchers.IO) { runCatching { proc.outputStream.use { it.write(stdinData.toByteArray()) } } }
+        } else stdin = OutputStreamWriter(proc.outputStream)
         scope.launch {
             withContext(Dispatchers.IO) {
-                val reader = proc.inputStream.bufferedReader()
-                val buf = ArrayList<String>()
-                var last = System.currentTimeMillis()
+                val reader = java.io.InputStreamReader(proc.inputStream, Charsets.UTF_8)
+                val cb = CharArray(8192)
+                val pending = StringBuilder()
+                var cr = false
                 while (true) {
-                    val l = reader.readLine() ?: break
-                    buf += l.replace(ansi, "")
-                    val now = System.currentTimeMillis()
-                    if (buf.size >= 200 || now - last > 60) {
-                        val chunk = buf.toList(); buf.clear(); last = now
-                        withContext(Dispatchers.Main) { append(chunk) }
+                    val n = runCatching { reader.read(cb) }.getOrDefault(-1)
+                    if (n < 0) break
+                    val complete = ArrayList<String>()
+                    for (i in 0 until n) {
+                        when (val ch = cb[i]) {
+                            '\n' -> { complete += clean(pending.toString()); pending.clear(); cr = false }
+                            '\r' -> cr = true
+                            '\u0007' -> {}
+                            else -> { if (cr) { pending.clear(); cr = false }; pending.append(ch) }
+                        }
                     }
+                    val partial = clean(pending.toString())
+                    withContext(Dispatchers.Main) { output(complete, partial) }
                 }
-                val rest = buf.toList()
                 val code = runCatching { proc.waitFor() }.getOrDefault(-1)
                 withContext(Dispatchers.Main) {
-                    append(rest)
-                    if (code != 0) lines += "[exit code $code]" to 2
+                    partialActive = false
+                    if (code != 0 && code != 143) lines += "[exit code $code]" to 2
                 }
             }
             running = null
@@ -188,8 +276,13 @@ class KonsoleSession(start: File, private val env: Map<String, String>, val droi
         }
     }
 
-    private fun append(chunk: List<String>) {
-        lines.addAll(chunk.map { it to 0 })
+    private fun clean(s: String) = s.replace(ansi, "")
+
+    private fun output(complete: List<String>, partial: String) {
+        if (partialActive && lines.isNotEmpty()) lines.removeAt(lines.lastIndex)
+        lines.addAll(complete.map { it to 0 })
+        partialActive = partial.isNotEmpty()
+        if (partialActive) lines += partial to 0
         val overflow = lines.size - 5000
         if (overflow > 0) lines.removeRange(0, overflow)
     }
@@ -210,7 +303,7 @@ class KonsoleSession(start: File, private val env: Map<String, String>, val droi
 fun Konsole(state: KdxState, w: KWindow) {
     val s = remember(w) {
         w.retain("konsole") {
-            val ds = state.droid?.takeIf { it.isInstalled }
+            val ds = state.droid
             val home = ds?.home ?: state.homeDir()
             val env = mutableMapOf("HOME" to home.path, "TERM" to "dumb")
             if (ds != null) env += mapOf(
@@ -239,11 +332,8 @@ fun Konsole(state: KdxState, w: KWindow) {
         ) { runCatching { focus.requestFocus() } }) {
             LazyColumn(Modifier.fillMaxSize().horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp), state = list) {
                 itemsIndexed(s.lines) { _, (text, kind) ->
-                    Text(
-                        text, style = style.copy(
-                            color = when (kind) { 1 -> Color(0xFF1CDC9A); 2 -> Color(0xFF9DA7B3); else -> fg },
-                        ), softWrap = false,
-                    )
+                    val base = when (kind) { 1 -> Color(0xFF1CDC9A); 2 -> Color(0xFF9DA7B3); else -> fg }
+                    Text(ansiToAnnotated(text, base), style = style.copy(color = base), softWrap = false)
                 }
             }
         }
