@@ -1,6 +1,7 @@
 package org.kdx.shell
 
 import org.junit.Assert.*
+import org.kdx.shell.droid.deleteTree
 import org.junit.Assume.assumeTrue
 import org.junit.FixMethodOrder
 import org.junit.Test
@@ -284,7 +285,7 @@ class DebianIntegrationTest {
         // the "real" files live in the repo; the runtime's files are links to them
         listOf("env", "sh", "cat", "echo").forEach { b -> File(sys.root, "usr/bin/$b").copyTo(File(repoObj, "$b.file"), overwrite = true).setExecutable(true, false) }
         val rt = File(sys.root, "var/lib/flatpak/runtime/org.example.Linked/x86_64/1/active/files")
-        rt.deleteRecursively(); File(rt, "bin").mkdirs()
+        rt.deleteTree(); File(rt, "bin").mkdirs()
         fun link(name: String, target: String) = java.nio.file.Files.createSymbolicLink(File(rt, "bin/$name").toPath(), java.nio.file.Paths.get(target))
         link("env", "/var/lib/flatpak/repo/objects/ab/env.file")                 // DroidSystem (guest) path
         link("sh", File(repoObj, "sh.file").path)                                 // real (host) path

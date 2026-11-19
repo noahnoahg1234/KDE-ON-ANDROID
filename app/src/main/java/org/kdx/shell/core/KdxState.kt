@@ -1,6 +1,7 @@
 package org.kdx.shell.core
 
 import android.app.Application
+import org.kdx.shell.droid.deleteTree
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ComponentName
@@ -214,7 +215,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         val d = debian ?: debianFor(droid)
         attachDebian(null)
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { d.root.deleteRecursively() }
+            withContext(Dispatchers.IO) { d.root.deleteTree() }
             refreshLinuxApps(); toast("Debian base removed")
         }
     }
@@ -312,7 +313,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         target.parentFile?.mkdirs()
         target.delete() // the empty dir left by the write probe
         val moved = current.renameTo(target) ||
-            (runCatching { current.copyRecursively(target, overwrite = true) }.getOrDefault(false) && current.deleteRecursively())
+            (runCatching { current.copyRecursively(target, overwrite = true) }.getOrDefault(false) && current.deleteTree())
         if (!moved) return null
         droidRoot = target.path
         save()

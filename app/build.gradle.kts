@@ -28,8 +28,8 @@ android {
         // Android 9 target, like Termux: apps targeting 10+ may not execute programs they download,
         // which DroidSystem needs to run Debian's Linux programs (via proot). Install by sideloading.
         targetSdk = 28
-        versionCode = 7
-        versionName = "2.1.3"
+        versionCode = 8
+        versionName = "2.1.4"
         // proot is bundled for these CPUs (see app/src/main/jniLibs)
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
     }
@@ -59,6 +59,7 @@ android {
             project.findProperty("kdx.integration")?.let { dir -> it.systemProperty("kdx.integration", dir.toString()); it.outputs.upToDateWhen { false } }
             project.findProperty("kdx.flatpak")?.let { id -> it.systemProperty("kdx.flatpak", id.toString()) }
             project.findProperty("kdx.debug")?.let { d -> it.systemProperty("kdx.debug", d.toString()) }
+            project.findProperty("kdx.wait")?.let { d -> it.systemProperty("kdx.wait", d.toString()) }
         }
     }
     packaging {

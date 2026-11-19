@@ -60,6 +60,8 @@ class DisplaySession : Closeable {
     var touchMode by mutableStateOf(true)
     var modifiers by mutableIntStateOf(0) // bit0 ctrl, bit1 alt, bit2 super (sticky)
     var onClose: () -> Unit = {}
+    /** True once the app has shown a window (until then the window says it's starting). */
+    var appReady by mutableStateOf(false)
     /** Set when the app stopped unexpectedly: exit code and its last log lines. */
     var crash by mutableStateOf<Pair<Int, List<String>>?>(null)
 
@@ -149,6 +151,8 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
                     break
                 }
                 val t = withContext(Dispatchers.IO) { disp.windowTitle() }
+                if (!t.isNullOrBlank()) s.appReady = true
+                else if (!disp.sys.hasCommand("usr/bin/xdotool") && System.currentTimeMillis() - disp.appStartedAt > 8000) s.appReady = true
                 w.title = t?.takeIf { it.isNotBlank() } ?: appName
             }
         }
@@ -225,6 +229,15 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
                     drawContext.canvas.scale(scale, scale)
                     drawImage(bmp.asImageBitmap(), filterQuality = if (scale < 1f) FilterQuality.Medium else FilterQuality.Low)
                     drawContext.canvas.restore()
+                }
+            }
+            if (appNo != null && s.connected && !s.appReady) {
+                Column(Modifier.align(Alignment.Center).background(Color(0xCC232627), androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator()
+                    Spacer(Modifier.height(10.dp))
+                    Text("Starting $appName…", color = Color.White, fontSize = 15.sp)
+                    Text("The first start can take a minute while it sets up.", color = Color(0xFFBDC3C7), fontSize = 12.sp)
                 }
             }
             // hidden text field that collects on-screen keyboard input

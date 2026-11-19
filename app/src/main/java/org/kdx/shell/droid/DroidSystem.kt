@@ -69,7 +69,7 @@ class DroidSystem(private val ctx: Context, val root: File) {
         progress(1f, "Done")
     }
 
-    fun uninstall(): Boolean = root.deleteRecursively()
+    fun uninstall(): Boolean = root.deleteTree()
 
     private val marker get() = File(root, "etc/droidsystem-version")
 
@@ -553,18 +553,18 @@ class DroidSystem(private val ctx: Context, val root: File) {
         val app = parseIni(meta.readText())["Application"] ?: throw IOException("metadata has no [Application] group")
         val id = app["name"] ?: throw IOException("metadata has no application name")
         val dest = flatpakDeploy(id)
-        dest.deleteRecursively()
+        dest.deleteTree()
         dir.copyRecursively(dest, overwrite = true)
         val desktop = File(dest, "export/share/applications/$id.desktop")
         if (!desktop.exists()) {
             desktop.parentFile?.mkdirs()
             desktop.writeText("[Desktop Entry]\nType=Application\nName=${id.substringAfterLast('.')}\nExec=flatpak run $id\nTerminal=true\nX-Flatpak=$id\n")
         }
-        if (!src.isDirectory) File(root, "tmp").listFiles()?.filter { it.name.startsWith("flatpak-") }?.forEach { it.deleteRecursively() }
+        if (!src.isDirectory) File(root, "tmp").listFiles()?.filter { it.name.startsWith("flatpak-") }?.forEach { it.deleteTree() }
         log("Installed $id (runtime ${app["runtime"] ?: "none"})")
     }
 
-    fun flatpakUninstall(id: String): Boolean = File(flatpakApps, id).deleteRecursively()
+    fun flatpakUninstall(id: String): Boolean = File(flatpakApps, id).deleteTree()
 
     /** The file a `flatpak run` would execute. */
     fun flatpakEntry(id: String): File? {

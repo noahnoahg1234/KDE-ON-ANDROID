@@ -1,6 +1,7 @@
 package org.kdx.shell.apps
 
 import android.content.Intent
+import org.kdx.shell.droid.deleteTree
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -225,7 +226,7 @@ fun Dolphin(state: KdxState, w: KWindow) {
                         while (dst.exists()) dst = File(s.cwd, "${src.nameWithoutExtension} (${n++})${if (src.extension.isNotEmpty()) "." + src.extension else ""}")
                         if (cut && src.renameTo(dst)) return@forEach
                         src.copyRecursively(dst)
-                        if (cut) src.deleteRecursively()
+                        if (cut) src.deleteTree()
                     }
                 }.exceptionOrNull()
             }
@@ -440,7 +441,7 @@ fun Dolphin(state: KdxState, w: KWindow) {
                 TextButton({
                     confirmDelete = null
                     scope.launch {
-                        val ok = withContext(Dispatchers.IO) { list.all { it.deleteRecursively() } }
+                        val ok = withContext(Dispatchers.IO) { list.all { it.deleteTree() } }
                         if (!ok) state.toast("Some items could not be deleted")
                         s.selected.clear(); s.refresh++
                     }
