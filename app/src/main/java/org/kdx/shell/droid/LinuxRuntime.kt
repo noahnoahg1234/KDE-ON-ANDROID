@@ -218,6 +218,12 @@ class FlatpakRunner(val sys: DebianSystem, private val display: LinuxDisplay) {
         val binds = mutableListOf(
             "/usr" to runtime.path, "/app" to File(app, "files").path,
             "/tmp" to File(sys.root, "tmp").path, "/root" to File(sys.root, "root").path,
+            // Android forbids hard links, so proot (--link2symlink) turns the hard links Flatpak/OSTree install into
+            // symlinks to files in Flatpak's repo – as DroidSystem paths (/var/lib/flatpak/..., /root/.local/...)
+            // or as real paths in KDX's private storage. Make both resolve inside the app's sandbox too; without
+            // this the runtime looks empty ("/usr/bin/env not found").
+            "/var/lib/flatpak" to File(sys.root, "var/lib/flatpak").apply { mkdirs() }.path,
+            sys.root.path to sys.root.path,
         )
         File(runtime, "etc").takeIf { it.isDirectory }?.let { binds += "/etc" to it.path }
         // host files Flatpak would normally provide

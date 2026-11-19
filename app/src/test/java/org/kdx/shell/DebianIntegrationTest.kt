@@ -272,4 +272,38 @@ class DebianIntegrationTest {
             sys.run("pkill -f 'Xvnc :4'; pkill -f kdx-app.xml")
         }
     }
+
+    /**
+     * Runtimes installed by flatpak inside proot on Android are mostly symlinks (proot's --link2symlink stands in for
+     * the hard links Android forbids), pointing at Flatpak's repo by DroidSystem path or by real path. The app's
+     * sandbox must resolve both, or the runtime looks empty ("/usr/bin/env not found").
+     */
+    @Test fun j_linkedRuntime() {
+        assumeTrue(work != null && sys.isInstalled)
+        val repoObj = File(sys.root, "var/lib/flatpak/repo/objects/ab").apply { mkdirs() }
+        // the "real" files live in the repo; the runtime's files are links to them
+        listOf("env", "sh", "cat", "echo").forEach { b -> File(sys.root, "usr/bin/$b").copyTo(File(repoObj, "$b.file"), overwrite = true).setExecutable(true, false) }
+        val rt = File(sys.root, "var/lib/flatpak/runtime/org.example.Linked/x86_64/1/active/files")
+        rt.deleteRecursively(); File(rt, "bin").mkdirs()
+        fun link(name: String, target: String) = java.nio.file.Files.createSymbolicLink(File(rt, "bin/$name").toPath(), java.nio.file.Paths.get(target))
+        link("env", "/var/lib/flatpak/repo/objects/ab/env.file")                 // DroidSystem (guest) path
+        link("sh", File(repoObj, "sh.file").path)                                 // real (host) path
+        link("cat", "/var/lib/flatpak/repo/objects/ab/cat.file")
+        link("echo", File(repoObj, "echo.file").path)
+        // the C library etc. come from Debian here (a real runtime ships its own)
+        listOf("lib", "lib64", "share").forEach { d ->
+            java.nio.file.Files.createSymbolicLink(File(rt, d).toPath(), File(sys.root, "usr/$d").toPath())
+        }
+        val id = "org.example.Linked.App"
+        val app = File(sys.root, "var/lib/flatpak/app/$id/current/active").apply { mkdirs() }
+        File(app, "metadata").writeText("[Application]\nname=$id\nruntime=org.example.Linked/x86_64/1\ncommand=hello\n")
+        File(app, "files/bin").mkdirs()
+        File(app, "files/bin/hello").apply { writeText("#!/bin/sh\necho linked-runtime-ok\n"); setExecutable(true, false) }
+        val fp = FlatpakRunner(sys, LinuxDisplay(sys))
+        val p = fp.command(id).start(); p.outputStream.close()
+        val out = p.inputStream.bufferedReader().readText(); val rc = p.waitFor()
+        println(out)
+        assertEquals(out, 0, rc)
+        assertTrue(out.contains("linked-runtime-ok"))
+    }
 }
