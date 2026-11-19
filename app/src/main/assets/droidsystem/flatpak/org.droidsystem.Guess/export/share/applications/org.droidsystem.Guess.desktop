@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Number Guess
+Comment=Guess the secret number (type into Konsole)
+Exec=flatpak run org.droidsystem.Guess
+Terminal=true
+Categories=Game;
+X-Flatpak=org.droidsystem.Guess

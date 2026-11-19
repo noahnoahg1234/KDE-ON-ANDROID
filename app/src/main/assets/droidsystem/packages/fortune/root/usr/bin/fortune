@@ -1,0 +1,15 @@
+#!/system/bin/sh
+# fortune - sayings written for DroidSystem
+set -- \
+ "A tidy home folder is a happy home folder." \
+ "Every great program starts as a script nobody meant to keep." \
+ "The panel is at the bottom; the possibilities are not." \
+ "Back up today, so tomorrow-you says thank you." \
+ "Nine virtual desktops are one too many. Eight is perfect." \
+ "Read the error message. Then read it again." \
+ "Small tools, joined well, beat one big tool used badly." \
+ "Your battery is a suggestion, not a promise." \
+ "The best shortcut is the one you remember." \
+ "There is no cloud, just someone else's DroidSystem."
+n=$(( (RANDOM % $#) + 1 ))
+eval "echo \"\${$n}\""

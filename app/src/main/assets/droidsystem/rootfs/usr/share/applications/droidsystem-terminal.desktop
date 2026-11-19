@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=DroidSystem Terminal
+Comment=Shell inside the DroidSystem Linux environment
+Exec=dsfetch
+Terminal=true
+Categories=System;TerminalEmulator;

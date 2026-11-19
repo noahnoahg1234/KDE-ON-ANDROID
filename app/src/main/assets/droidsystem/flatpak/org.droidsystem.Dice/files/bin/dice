@@ -1,0 +1,9 @@
+#!/system/bin/sh
+spec="${1:-2d6}"
+n=${spec%%d*}; s=${spec##*d}
+[ -z "$n" ] && n=1
+total=0; out=""
+i=0
+while [ $i -lt "$n" ]; do r=$(( (RANDOM % s) + 1 )); total=$((total + r)); out="$out $r"; i=$((i + 1)); done
+echo "Rolling $spec:$out"
+echo "Total: $total"

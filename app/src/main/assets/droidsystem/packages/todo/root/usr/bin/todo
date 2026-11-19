@@ -1,0 +1,12 @@
+#!/system/bin/sh
+# todo - minimal to-do list stored in ~/.todo
+db="$HOME/.todo"
+touch "$db"
+case "$1" in
+  add) shift; echo "$*" >> "$db"; echo "Added: $*" ;;
+  done) n="$2"; [ -z "$n" ] && { echo "usage: todo done N"; exit 1; }
+        sed -i "${n}d" "$db" && echo "Completed item $n" ;;
+  clear) : > "$db"; echo "List cleared" ;;
+  ""|list) if [ -s "$db" ]; then i=1; while IFS= read -r l; do echo "$i. $l"; i=$((i+1)); done < "$db"; else echo "Nothing to do!"; fi ;;
+  *) echo "usage: todo [list|add TEXT|done N|clear]" ;;
+esac

@@ -1,0 +1,8 @@
+[Application]
+name=org.droidsystem.Welcome
+runtime=org.droidsystem.Platform/aarch64/1.0
+sdk=org.droidsystem.Sdk/aarch64/1.0
+command=welcome
+
+[Context]
+filesystems=home;

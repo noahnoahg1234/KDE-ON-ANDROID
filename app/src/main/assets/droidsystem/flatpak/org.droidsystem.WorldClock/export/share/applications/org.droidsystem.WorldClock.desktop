@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=World Clock
+Comment=Current time in cities around the world
+Exec=flatpak run org.droidsystem.WorldClock
+Terminal=true
+Categories=Game;
+X-Flatpak=org.droidsystem.WorldClock

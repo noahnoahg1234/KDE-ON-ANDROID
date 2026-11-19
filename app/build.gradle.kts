@@ -1,3 +1,17 @@
+/** Writes droidsystem/index.txt: every file bundled in the DroidSystem image, so the app never relies on AssetManager.list(). */
+abstract class DroidSystemIndexTask : DefaultTask() {
+    @get:InputDirectory abstract val source: DirectoryProperty
+    @get:OutputDirectory abstract val outputDir: DirectoryProperty
+
+    @TaskAction fun run() {
+        val src = source.get().asFile
+        val files = src.walkTopDown().filter { it.isFile }.map { it.relativeTo(src).invariantSeparatorsPath }.sorted().toList()
+        val out = outputDir.get().asFile.resolve("droidsystem")
+        out.mkdirs()
+        out.resolve("index.txt").writeText(files.joinToString("\n"))
+    }
+}
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -39,6 +53,15 @@ android {
     }
 }
 
+val droidIndex = tasks.register<DroidSystemIndexTask>("droidSystemIndex") {
+    source.set(layout.projectDirectory.dir("src/main/assets/droidsystem"))
+}
+androidComponents {
+    onVariants { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(droidIndex, DroidSystemIndexTask::outputDir)
+    }
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)
@@ -49,6 +72,9 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    // Archive formats for DroidSystem (.deb = ar + tar.{gz,xz,bz2})
+    implementation("org.apache.commons:commons-compress:1.27.1")
+    implementation("org.tukaani:xz:1.10")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.14.1")

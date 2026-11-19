@@ -32,13 +32,17 @@ import kotlinx.coroutines.*
 import org.kdx.shell.core.KApp
 import org.kdx.shell.core.KWindow
 import org.kdx.shell.core.KdxState
+import org.kdx.shell.droid.DroidShell
+import org.kdx.shell.droid.DroidSystem
 import java.io.Closeable
 import java.io.File
 import java.io.OutputStreamWriter
 
 private val ansi = Regex("\u001B\\[[0-9;?]*[ -/]*[@-~]")
 
-class KonsoleSession(start: File, private val env: Map<String, String>) : Closeable {
+class KonsoleSession(start: File, private val env: Map<String, String>, val droid: DroidSystem? = null) : Closeable {
+    private var stateRef: KdxState? = null
+    val home: File get() = droid?.home ?: stateRef?.homeDir() ?: File("/")
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val lines = mutableStateListOf<Pair<String, Int>>() // text, kind: 0 out, 1 prompt, 2 err/info
     var cwd by mutableStateOf(start)
@@ -50,13 +54,47 @@ class KonsoleSession(start: File, private val env: Map<String, String>) : Closea
     private var stdin: OutputStreamWriter? = null
 
     init {
+        val ds = droid
+        if (ds != null) {
+            runCatching { File(ds.root, "etc/motd").readLines() }.getOrDefault(emptyList()).forEach { lines += it to 2 }
+        } else {
         lines += "Welcome to Konsole for KDX — Android ${android.os.Build.VERSION.RELEASE} (${System.getProperty("os.arch")})" to 2
         lines += "Commands run in Android's /system/bin/sh. Type 'help' for built-ins." to 2
+        }
     }
 
-    fun prompt() = "${cwd.path.replace(Regex("^/storage/emulated/0"), "~")} \$"
+    fun prompt(): String {
+        val ds = droid
+        if (ds != null) {
+            val h = ds.home.path
+            val p = if (cwd.path == h || cwd.path.startsWith("$h/")) "~" + cwd.path.removePrefix(h) else cwd.path
+            return "user@droidsystem:$p\$"
+        }
+        return "${cwd.path.replace(Regex("^/storage/emulated/0"), "~")} \$"
+    }
+
+    fun println(text: String, kind: Int = 0) { lines += text to kind }
+
+    /** Runs a command line as if typed (used by .desktop launchers). */
+    fun submitLine(cmd: String) { stateRef?.let { input = cmd; submit(it) } }
+
+    /** Runs blocking DroidSystem work off the main thread, streaming its log into the terminal. */
+    fun background(block: suspend ((String) -> Unit) -> Unit) {
+        scope.launch {
+            busy = true
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    block { msg -> scope.launch { lines += msg to (if (msg.startsWith("E:") || msg.startsWith("error")) 2 else 0) } }
+                }.onFailure { e -> withContext(Dispatchers.Main) { lines += "error: ${e.message}" to 2 } }
+            }
+            busy = false
+        }
+    }
+
+    var busy by mutableStateOf(false)
 
     fun submit(state: KdxState) {
+        stateRef = state
         val cmd = input
         input = ""
         histIdx = -1
@@ -74,6 +112,7 @@ class KonsoleSession(start: File, private val env: Map<String, String>) : Closea
         when {
             t == "clear" || t == "cls" -> lines.clear()
             t == "exit" -> { lines += "logout" to 2 }
+            t == "help" && droid != null -> lines += (DroidShell.help + "Shell built-ins: cd, clear, history, dolphin, kate, gwenview, kcalc").map { it to 2 }
             t == "help" -> lines += listOf(
                 "KDX Konsole built-ins:",
                 "  cd <dir>     change directory (supports ~ and ..)",
@@ -90,8 +129,8 @@ class KonsoleSession(start: File, private val env: Map<String, String>) : Closea
             t == "cd" || t.startsWith("cd ") -> {
                 val arg = t.removePrefix("cd").trim().trim('"', '\'')
                 val target = when {
-                    arg.isEmpty() || arg == "~" -> state.homeDir()
-                    arg.startsWith("~/") -> File(state.homeDir(), arg.drop(2))
+                    arg.isEmpty() || arg == "~" -> home
+                    arg.startsWith("~/") -> File(home, arg.drop(2))
                     arg.startsWith("/") -> File(arg)
                     else -> File(cwd, arg)
                 }.let { runCatching { it.canonicalFile }.getOrDefault(it) }
@@ -102,7 +141,7 @@ class KonsoleSession(start: File, private val env: Map<String, String>) : Closea
             t == "kate" -> state.open(KApp.KATE)
             t == "gwenview" || t.startsWith("gwenview ") -> state.open(KApp.GWENVIEW, resolve(t.removePrefix("gwenview").trim(), cwd).path)
             t == "kcalc" -> state.open(KApp.KCALC)
-            else -> exec(t)
+            else -> { val ds = droid; if (ds == null || !DroidShell.handle(this, state, ds, t)) exec(t) }
         }
     }
 
@@ -115,7 +154,7 @@ class KonsoleSession(start: File, private val env: Map<String, String>) : Closea
         }
     }
 
-    private fun exec(cmd: String) {
+    fun exec(cmd: String) {
         val pb = ProcessBuilder("/system/bin/sh", "-c", cmd).directory(cwd).redirectErrorStream(true)
         pb.environment().putAll(env)
         val proc = runCatching { pb.start() }.getOrElse {
@@ -171,7 +210,14 @@ class KonsoleSession(start: File, private val env: Map<String, String>) : Closea
 fun Konsole(state: KdxState, w: KWindow) {
     val s = remember(w) {
         w.retain("konsole") {
-            KonsoleSession(state.homeDir(), mapOf("HOME" to state.homeDir().path, "TERM" to "dumb")).also { ks ->
+            val ds = state.droid?.takeIf { it.isInstalled }
+            val home = ds?.home ?: state.homeDir()
+            val env = mutableMapOf("HOME" to home.path, "TERM" to "dumb")
+            if (ds != null) env += mapOf(
+                "USER" to "user", "LOGNAME" to "user", "HOSTNAME" to "droidsystem",
+                "DROIDSYSTEM_ROOT" to ds.root.path, "XDG_DATA_HOME" to File(home, ".local/share").path,
+            )
+            KonsoleSession(home.apply { mkdirs() }, env, ds).also { ks ->
                 // An initial command can be passed by KRunner ("> cmd") or Dolphin ("Open terminal here").
                 w.arg?.let { ks.input = it; ks.submit(state) }
             }
@@ -181,7 +227,7 @@ fun Konsole(state: KdxState, w: KWindow) {
     val focus = remember { FocusRequester() }
     LaunchedEffect(s.lines.size) { if (s.lines.isNotEmpty()) list.scrollToItem(s.lines.lastIndex) }
     LaunchedEffect(s.cwd, s.running) {
-        w.title = "${s.cwd.name.ifEmpty { "/" }} : ${if (s.running != null) "running" else "sh"} — Konsole"
+        w.title = "${s.cwd.name.ifEmpty { "/" }} : ${if (s.running != null) "running" else if (s.droid != null) "droidsystem" else "sh"} — Konsole"
     }
     val bg = Color(0xFF232627)
     val fg = Color(0xFFFCFCFC)

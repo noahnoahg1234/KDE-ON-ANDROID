@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Quick Notes
+Comment=Append dated notes to ~/notes.txt
+Exec=flatpak run org.droidsystem.Notes
+Terminal=true
+Categories=Game;
+X-Flatpak=org.droidsystem.Notes

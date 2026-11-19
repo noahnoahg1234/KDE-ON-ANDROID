@@ -37,6 +37,31 @@ It runs as a **home-screen launcher**, so it can fully replace your Android home
 | **Info Center** | Software, hardware and display information |
 | **System Settings** | Wallpaper, colours, desktops, panel, widgets, clock, shortcuts, Android integration |
 
+## Linux system: DroidSystem
+Turn it on in **System Settings → Linux System (DroidSystem)**. KDX installs **DroidSystem**, its own Linux-style
+system, into a `DroidSystem/` folder on your phone (or KDX's private folder if file access hasn't been granted).
+DroidSystem is written for KDX and bundled inside the APK (`app/src/main/assets/droidsystem`), so **nothing is downloaded**.
+
+| Settings | dsfetch | Flatpak |
+|---|---|---|
+| ![](docs/screenshots/droidsystem-settings.jpg) | ![](docs/screenshots/droidsystem-dsfetch.jpg) | ![](docs/screenshots/droidsystem-flatpak.jpg) |
+
+- **File system**: `etc/` (os-release, passwd, motd, profile), `home/user`, `usr/bin`, `usr/share/applications`, `var/lib/{dspkg,flatpak}`, …
+- **Konsole becomes a DroidSystem shell** (`user@droidsystem:~$`) with `dsfetch`, `droidsystem`, `extract`, `linuxinfo`, `run-desktop`.
+- **dspkg** package manager (`apt`/`apt-get` work as aliases): `update`, `list`, `search`, `show`, `install`, `remove`, `build`.
+  - Offline *main* repo: `droidsay`, `fortune`, `tree`, `todo`, `sysinfo`, `countdown`
+  - Installs real Debian **.deb** files (ar + tar.gz/xz/bz2) and DroidSystem's own **.dsp** packages (`dspkg build DIR` creates one)
+- **Flatpak**: `flatpak list | remotes | remote-ls | search | info | install | uninstall | run`. It installs Flatpak build
+  directories (`metadata` + `files/`, as a folder, .zip or .tar.*) and `.flatpakref` files that point at the offline **DroidHub**
+  remote: Welcome Tour, Dice, Number Guess, World Clock, Quick Notes.
+- **Linux apps in Kickoff**: `.desktop` launchers from packages and Flatpaks appear under **Applications → Linux**.
+- **Linux file types in Dolphin**: `.deb`/`.dsp` install, `.flatpakref` installs, `.desktop` launches, `.sh` runs,
+  `.tar.*`/`.zip` extract, and `.AppImage`/ELF/`.rpm` are identified. Folders with a `metadata` file get *Install as Flatpak*.
+
+**Android limit:** Android does not let apps execute downloaded native Linux programs (W^X policy, and there is no glibc).
+Packages and Flatpaks containing desktop-Linux binaries can be installed and inspected, but only script-based apps
+(like everything DroidSystem ships) actually run.
+
 ## Install
 Download `app-release.apk` from the latest **Build KDX** run in GitHub Actions (artifact `KDX-apk`) and install it.
 To use KDX as your home screen: *Kickoff → Leave → Default Home App*, then choose **KDX**.

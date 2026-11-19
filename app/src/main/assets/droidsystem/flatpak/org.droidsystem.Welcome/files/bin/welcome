@@ -1,0 +1,11 @@
+#!/system/bin/sh
+echo "Welcome to DroidSystem, $USER!"
+echo
+echo "This app runs as a Flatpak (id: $FLATPAK_ID)."
+echo "Flatpaks live in var/lib/flatpak inside your DroidSystem folder."
+echo
+echo "Things to try:"
+echo "  flatpak remote-ls          - browse DroidHub"
+echo "  flatpak install <app-id>   - install an app"
+echo "  dspkg list --available     - browse packages"
+echo "  dsfetch                    - show off your system"

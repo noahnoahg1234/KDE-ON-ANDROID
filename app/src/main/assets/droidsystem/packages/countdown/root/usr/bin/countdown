@@ -1,0 +1,5 @@
+#!/system/bin/sh
+# countdown - simple timer
+n="${1:-10}"
+while [ "$n" -gt 0 ]; do echo "$n..."; sleep 1; n=$((n - 1)); done
+echo "Time's up!"

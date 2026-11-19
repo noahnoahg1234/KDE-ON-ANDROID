@@ -8,6 +8,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.onLast
 import androidx.lifecycle.ViewModelProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -89,6 +91,37 @@ class ShellScreenshotTest {
         assertTrue(runnerMatches(state, "konsole").any { it.title == "Konsole" })
         assertTrue(runnerMatches(state, "gg:kde").any { it.title.contains("Google") })
         assertTrue(runnerMatches(state, "5 ft to m").first().title.startsWith("5 ft = 1.524"))
+    }
+
+    @Test fun droidSystem() {
+        val dir = java.nio.file.Files.createTempDirectory("ds").toFile()
+        rule.runOnUiThread { state.installDroid(dir) }
+        var tries = 0
+        while ((state.droid == null || state.linuxApps.isEmpty()) && tries++ < 100) { rule.mainClock.advanceTimeBy(100); Thread.sleep(50) }
+        assertTrue("DroidSystem should install", state.droid != null)
+        rule.runOnUiThread { state.open(KApp.SETTINGS) }
+        shot("40-settings-droidsystem")
+        rule.runOnUiThread {
+            state.windows.toList().forEach { state.close(it) }
+            state.open(KApp.KONSOLE, "dsfetch")
+        }
+        shot("41-konsole-dsfetch")
+        rule.runOnUiThread { state.windows.toList().forEach { state.close(it) }; state.open(KApp.KONSOLE, "dspkg install droidsay fortune") }
+        var waited = 0
+        while (!state.droid!!.isPkgInstalled("fortune") && waited++ < 100) {
+            rule.mainClock.advanceTimeBy(50); org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); Thread.sleep(50)
+        }
+        shot("42a-konsole-dspkg")
+        rule.runOnUiThread { state.windows.toList().forEach { state.close(it) }; state.open(KApp.KONSOLE, "flatpak remote-ls") }
+        shot("42-konsole-flatpak")
+        assertTrue(state.droid!!.isPkgInstalled("fortune"))
+        rule.runOnUiThread { state.windows.toList().forEach { state.close(it) }; state.kickoffOpen = true }
+        rule.mainClock.advanceTimeBy(300)
+        rule.onAllNodes(androidx.compose.ui.test.hasSetTextAction()).onLast().performTextInput("droid")
+        shot("43-kickoff-linux")
+        rule.onNodeWithText("Welcome Tour").assertExists()
+        rule.runOnUiThread { state.closeMenus(); state.open(KApp.DOLPHIN, dir.path) }
+        shot("44-dolphin-droidsystem")
     }
 
     @Test fun konsoleRunsCommands() {

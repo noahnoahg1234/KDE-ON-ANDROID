@@ -1,0 +1,15 @@
+#!/system/bin/sh
+# droidsay - DroidSystem's talking robot
+msg="$*"
+[ -z "$msg" ] && read -r msg
+len=${#msg}
+line=""
+i=0
+while [ $i -lt $((len + 2)) ]; do line="$line-"; i=$((i + 1)); done
+echo " $line"
+echo "< $msg >"
+echo " $line"
+echo "      \\"
+echo "       \\   [o_o]"
+echo "        \\ /|___|\\"
+echo "           d   b"

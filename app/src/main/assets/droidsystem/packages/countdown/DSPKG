@@ -1,0 +1,4 @@
+Package: countdown
+Version: 1.0
+Architecture: all
+Description: Counts down N seconds, then rings the bell

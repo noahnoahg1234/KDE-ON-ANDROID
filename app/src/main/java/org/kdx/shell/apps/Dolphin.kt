@@ -90,8 +90,34 @@ fun humanSize(bytes: Long): String {
     return "%.1f %s".format(v, units[i])
 }
 
+private val archiveRe = Regex(".*\\.(tar|tar\\.gz|tgz|tar\\.xz|txz|tar\\.bz2|tbz2|zip)$", RegexOption.IGNORE_CASE)
+fun File.isArchive() = archiveRe.matches(name)
+
+/** The DroidSystem command that handles a Linux file type, or null for normal handling. */
+fun linuxCommand(f: File): String? {
+    val q = org.kdx.shell.droid.DroidShell.quote(f.path)
+    return when (f.extension.lowercase()) {
+        "desktop" -> "run-desktop $q"
+        "sh", "bash" -> "sh $q"
+        "deb", "dsp" -> "dspkg install $q"
+        "flatpakref", "flatpak" -> "flatpak install $q"
+        "appimage", "rpm", "snap", "so", "elf", "bin", "run" -> "linuxinfo $q"
+        else -> when {
+            f.isArchive() -> "extract $q"
+            f.length() in 4..(512L * 1024 * 1024) && org.kdx.shell.droid.DroidSystem.isElf(f) -> "linuxinfo $q"
+            else -> null
+        }
+    }
+}
+
 private fun iconFor(f: File): ImageVector = when {
+    f.isDirectory && File(f, "metadata").isFile && File(f, "files").isDirectory -> Icons.Filled.Inventory2
     f.isDirectory -> Icons.Filled.Folder
+    f.extension.lowercase() in setOf("deb", "dsp", "rpm", "snap") -> Icons.Filled.Inventory2
+    f.extension.lowercase() in setOf("flatpak", "flatpakref") -> Icons.Filled.Widgets
+    f.extension.lowercase() == "desktop" -> Icons.Filled.RocketLaunch
+    f.extension.lowercase() in setOf("sh", "bash") -> Icons.Filled.Terminal
+    f.extension.lowercase() == "appimage" -> Icons.Filled.Memory
     f.isImageFile() -> Icons.Filled.Image
     f.extension.lowercase() in setOf("mp3", "ogg", "flac", "wav", "m4a", "opus") -> Icons.Filled.MusicNote
     f.extension.lowercase() in setOf("mp4", "mkv", "webm", "avi", "mov") -> Icons.Filled.Movie
@@ -163,8 +189,12 @@ fun Dolphin(state: KdxState, w: KWindow) {
     }
     val shown = if (s.filter.isBlank()) entries else entries.filter { it.name.contains(s.filter, true) }
 
+    val linux = state.droid != null && state.linuxFileTypes
+
     fun open(f: File) {
+        val linuxCmd = if (linux && f.isFile) linuxCommand(f) else null
         when {
+            linuxCmd != null -> state.open(KApp.KONSOLE, linuxCmd)
             f.isDirectory -> s.go(f)
             f.isImageFile() -> state.open(KApp.GWENVIEW, f.path)
             f.isTextFile() -> state.open(KApp.KATE, f.path)
@@ -231,6 +261,9 @@ fun Dolphin(state: KdxState, w: KWindow) {
             Triple("Camera", Icons.Filled.PhotoCamera, File(root, "DCIM")),
             Triple("Music", Icons.Filled.MusicNote, File(root, "Music")),
             Triple("KDX data", Icons.Filled.Folder, ctx.filesDir),
+        ) + listOfNotNull(
+            state.droid?.let { Triple("DroidSystem", Icons.Filled.Terminal, it.root) },
+        ) + listOf(
             Triple("Root", Icons.Filled.Storage, File("/")),
         )
         LazyRow(
@@ -329,7 +362,19 @@ fun Dolphin(state: KdxState, w: KWindow) {
                                 DropdownMenuItem(text = { Text("Open with Kate") }, onClick = { menu = false; state.open(KApp.KATE, f.path) })
                                 DropdownMenuItem(text = { Text("Open with…") }, onClick = { menu = false; openFileExternally(state, ctx, f) })
                                 DropdownMenuItem(text = { Text("Share") }, onClick = { menu = false; shareFile(state, ctx, f) })
+                                if (linux && f.isArchive()) DropdownMenuItem(text = { Text("Extract Here") }, onClick = {
+                                    menu = false; state.open(KApp.KONSOLE, "extract ${org.kdx.shell.droid.DroidShell.quote(f.path)}")
+                                })
+                                if (linux && state.flatpakEnabled && f.isArchive()) DropdownMenuItem(text = { Text("Install as Flatpak") }, onClick = {
+                                    menu = false; state.open(KApp.KONSOLE, "flatpak install ${org.kdx.shell.droid.DroidShell.quote(f.path)}")
+                                })
                             } else {
+                                if (linux && state.flatpakEnabled && File(f, "metadata").isFile) DropdownMenuItem(text = { Text("Install as Flatpak") }, onClick = {
+                                    menu = false; state.open(KApp.KONSOLE, "flatpak install ${org.kdx.shell.droid.DroidShell.quote(f.path)}")
+                                })
+                                if (linux && File(f, "DSPKG").isFile) DropdownMenuItem(text = { Text("Build DroidSystem Package") }, onClick = {
+                                    menu = false; state.open(KApp.KONSOLE, "dspkg build ${org.kdx.shell.droid.DroidShell.quote(f.path)}")
+                                })
                                 DropdownMenuItem(text = { Text("Open in New Window") }, onClick = { menu = false; state.open(KApp.DOLPHIN, f.path) })
                                 DropdownMenuItem(text = { Text("Open Terminal Here") }, onClick = { menu = false; state.open(KApp.KONSOLE, "cd \"${f.path}\"") })
                             }

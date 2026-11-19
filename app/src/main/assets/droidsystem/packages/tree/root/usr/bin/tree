@@ -1,0 +1,24 @@
+#!/system/bin/sh
+# tree - list directories as a tree
+walk() {
+  prefix="$2"
+  for f in "$1"/* ; do
+    [ -e "$f" ] || continue
+    name=${f##*/}
+    if [ -d "$f" ]; then
+      echo "${prefix}+-- $name/"
+      dirs=$((dirs + 1))
+      walk "$f" "$prefix|   "
+      prefix="$2"
+    else
+      echo "${prefix}+-- $name"
+      files=$((files + 1))
+    fi
+  done
+}
+dirs=0; files=0
+root="${1:-.}"
+echo "$root"
+walk "$root" ""
+echo
+echo "$dirs directories, $files files"

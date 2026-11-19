@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Dice
+Comment=Roll dice: dice 3d6
+Exec=flatpak run org.droidsystem.Dice
+Terminal=true
+Categories=Game;
+X-Flatpak=org.droidsystem.Dice

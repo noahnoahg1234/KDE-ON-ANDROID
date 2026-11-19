@@ -1,0 +1,4 @@
+#!/system/bin/sh
+for z in America/Los_Angeles America/New_York Europe/London Europe/Berlin Asia/Kolkata Asia/Tokyo Australia/Sydney; do
+  printf "%-22s %s\n" "$z" "$(TZ=$z date '+%a %H:%M')"
+done

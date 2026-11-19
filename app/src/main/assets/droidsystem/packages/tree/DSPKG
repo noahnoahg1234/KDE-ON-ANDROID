@@ -1,0 +1,4 @@
+Package: tree
+Version: 1.0
+Architecture: all
+Description: Shows a folder as an indented tree

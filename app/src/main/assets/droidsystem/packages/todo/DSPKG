@@ -1,0 +1,4 @@
+Package: todo
+Version: 1.0
+Architecture: all
+Description: A tiny to-do list for the terminal

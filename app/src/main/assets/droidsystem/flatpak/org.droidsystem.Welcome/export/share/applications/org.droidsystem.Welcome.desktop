@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Welcome Tour
+Comment=A guided tour of DroidSystem
+Exec=flatpak run org.droidsystem.Welcome
+Terminal=true
+Categories=Game;
+X-Flatpak=org.droidsystem.Welcome

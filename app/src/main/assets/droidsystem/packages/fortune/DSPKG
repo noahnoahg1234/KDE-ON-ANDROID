@@ -1,0 +1,4 @@
+Package: fortune
+Version: 1.0
+Architecture: all
+Description: Prints a random saying from the DroidSystem collection

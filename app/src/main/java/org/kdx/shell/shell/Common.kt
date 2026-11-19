@@ -28,6 +28,10 @@ import org.kdx.shell.core.AndroidApp
 import org.kdx.shell.core.KApp
 import org.kdx.shell.core.KdxState
 import org.kdx.shell.core.LocalBreeze
+import org.kdx.shell.droid.DroidSystem
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Terminal
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -49,24 +53,43 @@ sealed interface Launchable {
         override val label get() = app.label
         override val subtitle get() = "Android app"
     }
+
+    /** A .desktop entry from DroidSystem (dspkg package or Flatpak). */
+    data class Linux(val entry: DroidSystem.DesktopEntry) : Launchable {
+        override val key get() = entry.key
+        override val label get() = entry.name
+        override val subtitle get() = (if (entry.flatpakId != null) "Flatpak · " else "DroidSystem · ") + entry.comment.ifEmpty { "Linux app" }
+    }
 }
 
 fun KdxState.launchables(): List<Launchable> =
-    KApp.entries.map { Launchable.Kdx(it) } + androidApps.map { Launchable.Droid(it) }
+    KApp.entries.map { Launchable.Kdx(it) } + linuxApps.map { Launchable.Linux(it) } + androidApps.map { Launchable.Droid(it) }
 
 fun KdxState.resolve(key: String): Launchable? =
     if (key.startsWith("kdx:")) runCatching { Launchable.Kdx(KApp.valueOf(key.removePrefix("kdx:"))) }.getOrNull()
+    else if (key.startsWith("linux:")) linuxApps.firstOrNull { it.key == key }?.let { Launchable.Linux(it) }
     else androidApps.firstOrNull { it.key == key }?.let { Launchable.Droid(it) }
 
 fun KdxState.launch(l: Launchable) = when (l) {
     is Launchable.Kdx -> open(l.app)
     is Launchable.Droid -> launch(l.app)
+    is Launchable.Linux -> open(KApp.KONSOLE, l.entry.exec)
 }
 
 @Composable
 fun LaunchableIcon(l: Launchable, size: Dp) {
     when (l) {
         is Launchable.Kdx -> KAppIcon(l.app, size)
+        is Launchable.Linux -> Box(
+            Modifier.size(size).clip(RoundedCornerShape(size / 4))
+                .background(if (l.entry.flatpakId != null) Color(0xFF4A86CF) else Color(0xFFE95420)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                if (l.entry.flatpakId != null) Icons.Filled.Inventory2 else Icons.Filled.Terminal, l.label,
+                tint = Color.White, modifier = Modifier.size(size * 0.6f),
+            )
+        }
         is Launchable.Droid -> {
             val bmp = l.app.icon
             if (bmp != null) Image(bmp, l.label, Modifier.size(size))

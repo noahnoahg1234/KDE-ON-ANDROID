@@ -1,0 +1,12 @@
+#!/system/bin/sh
+# sysinfo - kernel / memory / disk summary
+echo "Kernel : $(uname -sr)"
+echo "Arch   : $(uname -m)"
+echo "Uptime : $(cut -d. -f1 /proc/uptime 2>/dev/null) seconds"
+if [ -r /proc/meminfo ]; then
+  t=$(grep MemTotal /proc/meminfo | tr -s ' ' | cut -d' ' -f2)
+  a=$(grep MemAvailable /proc/meminfo | tr -s ' ' | cut -d' ' -f2)
+  echo "Memory : $(( (t - a) / 1024 )) MiB used of $(( t / 1024 )) MiB"
+fi
+echo "Disk   :"
+df -h "$HOME" 2>/dev/null | tail -n 1

@@ -1,0 +1,8 @@
+  [o_o]  DroidSystem 1.0 "Breeze"
+ /|___|\ the KDX Linux system
+   d b
+
+ dspkg list     packages (apt works too)
+ flatpak remote-ls   DroidHub apps
+ dsfetch        system information
+ help           all commands

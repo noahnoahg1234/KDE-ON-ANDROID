@@ -1,0 +1,5 @@
+#!/system/bin/sh
+f="$HOME/notes.txt"
+if [ -n "$1" ]; then echo "$(date '+%Y-%m-%d %H:%M')  $*" >> "$f"; echo "Saved."; fi
+echo "--- $f ---"
+[ -f "$f" ] && tail -n 15 "$f" || echo "(no notes yet: notes <text>)"

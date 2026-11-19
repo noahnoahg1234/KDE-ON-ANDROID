@@ -1,0 +1,13 @@
+#!/system/bin/sh
+secret=$(( (RANDOM % 100) + 1 ))
+tries=0
+echo "I'm thinking of a number between 1 and 100."
+while true; do
+  echo "Your guess?"
+  read -r g || exit 0
+  tries=$((tries + 1))
+  case "$g" in ''|*[!0-9]*) echo "Numbers only, please."; continue ;; esac
+  if [ "$g" -lt "$secret" ]; then echo "Higher!"
+  elif [ "$g" -gt "$secret" ]; then echo "Lower!"
+  else echo "Correct! You got it in $tries tries."; exit 0; fi
+done

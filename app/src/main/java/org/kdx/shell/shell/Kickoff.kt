@@ -112,7 +112,8 @@ fun Kickoff(state: KdxState, compact: Boolean) {
                             }
                         }
                         KickoffTab.APPS -> Column {
-                            val cats = listOf("All", "KDX") + KApp.entries.map { it.category }.distinct() + "Android"
+                            val cats = listOf("All", "KDX") + KApp.entries.map { it.category }.distinct() +
+                                (if (state.linuxApps.isNotEmpty()) listOf("Linux") else emptyList()) + "Android"
                             LazyRow(
                                 Modifier.fillMaxWidth().padding(vertical = 6.dp),
                                 contentPadding = PaddingValues(horizontal = 8.dp),
@@ -127,6 +128,7 @@ fun Kickoff(state: KdxState, compact: Boolean) {
                                     "All" -> true
                                     "KDX" -> it is Launchable.Kdx
                                     "Android" -> it is Launchable.Droid
+                                    "Linux" -> it is Launchable.Linux
                                     else -> it is Launchable.Kdx && it.app.category == category
                                 }
                             }.sortedBy { it.label.lowercase() }
@@ -170,6 +172,7 @@ fun searchResults(state: KdxState, query: String): List<Launchable> {
             label.contains(q) -> 3
             l is Launchable.Kdx && (l.app.generic.lowercase().contains(q) || l.app.keywords.contains(q)) -> 4
             l is Launchable.Droid && l.app.pkg.lowercase().contains(q) -> 5
+            l is Launchable.Linux && (l.entry.comment.lowercase().contains(q) || (l.entry.flatpakId ?: "").lowercase().contains(q)) -> 5
             else -> null
         }
         score?.let { it to l }

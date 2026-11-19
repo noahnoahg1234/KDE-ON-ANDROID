@@ -260,6 +260,7 @@ fun SystemSettings(state: KdxState, w: KWindow) {
     fun set(block: () -> Unit) { block(); state.save() }
 
     Column(Modifier.fillMaxSize().background(c.window).verticalScroll(scroll)) {
+        LinuxSystemSection(state)
         Section("Wallpaper", Icons.Filled.Wallpaper) {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Wallpapers.forEachIndexed { i, wp ->
@@ -346,4 +347,65 @@ private fun Toggle(label: String, value: Boolean, onChange: (Boolean) -> Unit) {
         Text(label, Modifier.weight(1f), color = c.text, fontSize = 14.sp)
         Switch(value, onChange)
     }
+}
+
+/** System Settings → Linux System: installs and manages DroidSystem. */
+@Composable
+private fun LinuxSystemSection(state: KdxState) {
+    val c = LocalBreeze.current
+    var confirmUninstall by remember { mutableStateOf(false) }
+    val ds = state.droid
+    val stats by produceState<Triple<Long, Int, Int>?>(null, ds?.root, state.linuxApps) {
+        value = ds?.let { withContext(Dispatchers.IO) { Triple(it.sizeOnDisk(), it.installed().size, it.flatpakInstalled().size) } }
+    }
+    Section("Linux System (DroidSystem)", Icons.Filled.Terminal) {
+        Text(
+            "DroidSystem is KDX's own Linux-style system. It is bundled inside KDX and installed into a folder on " +
+                "your phone, with nothing downloaded. It adds a Linux file system, the dspkg package manager (apt-compatible), " +
+                "Flatpak support and Linux file types in Dolphin.",
+            color = c.inactiveText, fontSize = 13.sp,
+        )
+        Spacer(Modifier.height(6.dp))
+        val busy = state.droidProgress
+        Toggle("Enable Linux system", state.droidEnabled && ds != null) { on ->
+            if (on) state.enableDroid() else { state.droidEnabled = false; state.save(); state.refreshLinuxApps() }
+        }
+        if (busy != null) {
+            Text("Installing DroidSystem: ${busy.second}", color = c.text, fontSize = 13.sp)
+            LinearProgressIndicator(progress = { busy.first }, Modifier.fillMaxWidth().padding(vertical = 6.dp))
+        } else if (ds == null) {
+            val target = state.droidTargetDir()
+            KV("Install location", target.path)
+            if (!state.hasStorageAccess()) Text(
+                "Tip: grant KDX file access first (Dolphin → Grant) to install DroidSystem into your phone's main " +
+                    "folder, where other apps and your PC can see it.",
+                color = c.neutral, fontSize = 12.sp,
+            )
+        } else {
+            KV("Version", ds.version)
+            KV("Location", ds.root.path)
+            stats?.let { (size, pkgs, fps) ->
+                KV("Size", humanSize(size)); KV("Packages", "$pkgs (dspkg)"); KV("Flatpak apps", "$fps")
+            }
+            Toggle("Flatpak support", state.flatpakEnabled) { state.flatpakEnabled = it; state.save(); state.refreshLinuxApps() }
+            Toggle("Open Linux file types in Dolphin (.deb .dsp .desktop .sh .flatpakref .tar.*)", state.linuxFileTypes) {
+                state.linuxFileTypes = it; state.save()
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton({ state.open(org.kdx.shell.core.KApp.KONSOLE) }, Modifier.weight(1f)) { Text("Terminal") }
+                OutlinedButton({ state.open(org.kdx.shell.core.KApp.DOLPHIN, ds.root.path) }, Modifier.weight(1f)) { Text("Browse") }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton({ state.installDroid(ds.root) }, Modifier.weight(1f)) { Text("Repair") }
+                OutlinedButton({ confirmUninstall = true }, Modifier.weight(1f)) { Text("Uninstall", color = c.negative) }
+            }
+        }
+    }
+    if (confirmUninstall) AlertDialog(
+        onDismissRequest = { confirmUninstall = false },
+        title = { Text("Uninstall DroidSystem?") },
+        text = { Text("This deletes ${ds?.root?.path} with all installed packages, Flatpak apps and files in its home folder.") },
+        confirmButton = { TextButton({ confirmUninstall = false; state.uninstallDroid() }) { Text("Uninstall", color = c.negative) } },
+        dismissButton = { TextButton({ confirmUninstall = false }) { Text("Cancel") } },
+    )
 }

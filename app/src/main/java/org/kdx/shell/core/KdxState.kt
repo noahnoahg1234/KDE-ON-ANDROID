@@ -23,6 +23,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.kdx.shell.droid.DroidSystem
 import java.io.Closeable
 import java.io.File
 
@@ -104,7 +105,65 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         )
     }
 
+    // ---- DroidSystem (Linux system) ----
+    var droidEnabled by mutableStateOf(prefs.getBoolean("droid", false))
+    var droidRoot by mutableStateOf(prefs.getString("droidRoot", null))
+    var flatpakEnabled by mutableStateOf(prefs.getBoolean("flatpak", true))
+    var linuxFileTypes by mutableStateOf(prefs.getBoolean("linuxTypes", true))
+    var droidProgress by mutableStateOf<Pair<Float, String>?>(null)
+    var linuxApps by mutableStateOf<List<DroidSystem.DesktopEntry>>(emptyList())
+        private set
+
+    /** The installed DroidSystem, or null when the Linux system is disabled / not installed. */
+    val droid: DroidSystem?
+        get() = droidRoot?.takeIf { droidEnabled }?.let { DroidSystem(ctx, File(it)) }?.takeIf { it.isInstalled }
+
+    /** Where a new DroidSystem goes: the phone's storage when KDX has file access, else KDX's private folder. */
+    fun droidTargetDir(): File =
+        if (hasStorageAccess()) File(Environment.getExternalStorageDirectory(), "DroidSystem") else File(ctx.filesDir, "DroidSystem")
+
+    fun enableDroid() {
+        if (droidProgress != null) return
+        val existing = droidRoot?.let { DroidSystem(ctx, File(it)) }?.takeIf { it.isInstalled }
+        if (existing != null) { droidEnabled = true; save(); refreshLinuxApps(); return }
+        installDroid(droidTargetDir())
+    }
+
+    fun installDroid(dir: File) {
+        val ds = DroidSystem(ctx, dir)
+        droidProgress = 0f to "Preparing"
+        viewModelScope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching { ds.install { p, msg -> viewModelScope.launch { droidProgress = p to msg } } }
+            }
+            droidProgress = null
+            r.onSuccess {
+                droidRoot = dir.path; droidEnabled = true; save(); refreshLinuxApps()
+                toast("DroidSystem installed in ${dir.path}")
+            }.onFailure { toast("DroidSystem install failed: ${it.message}") }
+        }
+    }
+
+    fun uninstallDroid() {
+        val dir = droidRoot?.let { File(it) } ?: return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { DroidSystem(ctx, dir).uninstall() }
+            droidEnabled = false; droidRoot = null; linuxApps = emptyList(); save()
+            toast("DroidSystem removed")
+        }
+    }
+
+    fun refreshLinuxApps() {
+        viewModelScope.launch {
+            linuxApps = withContext(Dispatchers.IO) { droid?.desktopEntries(flatpakEnabled) ?: emptyList() }
+        }
+    }
+
     fun save() = prefs.edit()
+        .putBoolean("droid", droidEnabled)
+        .putString("droidRoot", droidRoot)
+        .putBoolean("flatpak", flatpakEnabled)
+        .putBoolean("linuxTypes", linuxFileTypes)
         .putInt("theme", themeMode.ordinal)
         .putInt("accent", accentIndex)
         .putInt("wallpaper", wallpaperIndex)
@@ -147,6 +206,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
 
     init {
         reloadApps()
+        refreshLinuxApps()
     }
 
     fun reloadApps() {
