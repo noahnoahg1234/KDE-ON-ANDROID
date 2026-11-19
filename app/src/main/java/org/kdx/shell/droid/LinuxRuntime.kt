@@ -49,6 +49,9 @@ class LinuxDisplay(
         "MOZ_DISABLE_CONTENT_SANDBOX" to "1", "MOZ_DISABLE_GMP_SANDBOX" to "1", "MOZ_DISABLE_RDD_SANDBOX" to "1",
         "MOZ_DISABLE_SOCKET_PROCESS_SANDBOX" to "1", "MOZ_DISABLE_UTILITY_SANDBOX" to "1", "MOZ_DISABLE_GPU_SANDBOX" to "1",
         "MOZ_DISABLE_VR_SANDBOX" to "1", "MOZ_FAKE_NO_SANDBOX" to "1", "MOZ_CRASHREPORTER_DISABLE" to "1",
+        // Fission runs one process per web site; Android 12+ kills apps' extra child processes and phones are
+        // short on memory, so keep Firefox to a few processes
+        "MOZ_FORCE_DISABLE_FISSION" to "1",
         "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS" to "1", "WEBKIT_FORCE_SANDBOX" to "0",
     )
 
@@ -129,8 +132,22 @@ class LinuxDisplay(
         @Volatile private var sharedBus: Process? = null
     }
 
+    /** Where this display's log is also saved (set by KDX for app windows), so it survives crashes. */
+    @Volatile var logFile: File? = null
+
+    /** Appends a line to the saved log file (best effort). */
+    fun logToFile(line: String) {
+        val f = logFile ?: return
+        synchronized(this) { runCatching { f.appendText(line + "\n") } }
+    }
+
     fun drain(p: Process, tag: String) = Thread {
-        runCatching { p.inputStream.bufferedReader().forEachLine { log.add("$tag: $it"); while (log.size > 400) log.pollFirst() } }
+        runCatching {
+            p.inputStream.bufferedReader().forEachLine {
+                log.add("$tag: $it"); while (log.size > 400) log.pollFirst()
+                logToFile("$tag: $it")
+            }
+        }
     }.apply { isDaemon = true }.start()
 
     private fun <T> java.util.Deque<T>.takeLast(n: Int) = toList().takeLast(n)

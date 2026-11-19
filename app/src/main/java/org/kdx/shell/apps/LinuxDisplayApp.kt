@@ -64,6 +64,7 @@ class DisplaySession : Closeable {
     var appReady by mutableStateOf(false)
     /** Set when the app stopped unexpectedly: exit code and its last log lines. */
     var crash by mutableStateOf<Pair<Int, List<String>>?>(null)
+    var crashRanMs = 0L
 
     fun connect(port: Int) {
         if (connected) return
@@ -146,7 +147,12 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
                 if (!p.isAlive) {
                     val code = runCatching { p.exitValue() }.getOrDefault(-1)
                     val ran = System.currentTimeMillis() - disp.appStartedAt
-                    if (ran < 20_000 || code !in setOf(0, 130, 143)) { s.crash = code to disp.appLog().takeLast(80) }
+                    disp.logToFile("==== $appName exited with code $code after ${ran / 1000} s ====")
+                    delay(800) // let the last output lines arrive before showing them
+                    val lines = disp.appLog().takeLast(120).ifEmpty {
+                        disp.logFile?.let { f -> withContext(Dispatchers.IO) { runCatching { f.readLines().takeLast(120) }.getOrNull() } } ?: emptyList()
+                    }
+                    if (ran < 20_000 || code !in setOf(0, 130, 143)) { s.crash = code to lines; s.crashRanMs = ran }
                     else { state.toast("$appName closed"); state.close(w) }
                     break
                 }
@@ -157,7 +163,7 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
             }
         }
         s.crash?.let { (code, lines) ->
-            CrashPanel(state, appName, code, lines,
+            CrashPanel(state, appName, code, lines, s.crashRanMs, disp.logFile,
                 restart = {
                     s.crash = null
                     s.scope.launch(Dispatchers.IO) { disp.relaunch?.let { disp.appProcess = it() } }
@@ -181,6 +187,9 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
             }
             IconButton({ s.showKeys = !s.showKeys }, Modifier.size(40.dp)) {
                 Icon(Icons.Filled.KeyboardCommandKey, "Special keys", tint = if (s.showKeys) c.accent else c.text)
+            }
+            disp.logFile?.let { f ->
+                IconButton({ state.open(KApp.KATE, f.path) }, Modifier.size(40.dp)) { Icon(Icons.Filled.Article, "App log", tint = c.text) }
             }
             Text(if (s.touchMode) "Touch: tap, drag to scroll, hold for right-click, hold+drag to drag" else "Mouse: drag = drag, hold = right-click",
                 Modifier.weight(1f).padding(horizontal = 4.dp), color = c.inactiveText, fontSize = 11.sp, maxLines = 1)
@@ -385,7 +394,10 @@ private fun hardwareKey(s: DisplaySession, e: KeyEvent): Boolean {
 
 /** Shown instead of silently closing when a Linux app stops right away or with an error. */
 @Composable
-private fun CrashPanel(state: KdxState, app: String, code: Int, log: List<String>, restart: () -> Unit, close: () -> Unit) {
+private fun CrashPanel(
+    state: KdxState, app: String, code: Int, log: List<String>, ranMs: Long, logFile: java.io.File?,
+    restart: () -> Unit, close: () -> Unit,
+) {
     val c = LocalBreeze.current
     // proot reports "killed by signal N" as 128+N
     val why = when (code) {
@@ -402,10 +414,18 @@ private fun CrashPanel(state: KdxState, app: String, code: Int, log: List<String
             Spacer(Modifier.width(10.dp))
             Text("$app stopped", color = c.text, fontSize = 20.sp)
         }
-        Text(why, color = c.text, fontSize = 14.sp, modifier = Modifier.padding(vertical = 8.dp))
+        Text(why, color = c.text, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
+        Text("Exit code $code after ${ranMs / 1000} s." + if (log.none { it.substringAfter(": ", it).isNotBlank() && !it.startsWith("====") })
+            " It printed nothing at all, which means it was stopped from outside (by Android) before it could report anything." else "",
+            color = c.inactiveText, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
+        logFile?.let { Text("Full log saved to ${it.path}", color = c.inactiveText, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp)) }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(restart) { Text("Restart") }
-            OutlinedButton({ state.copyText("$app exited with code $code\n" + log.joinToString("\n")); state.toast("Log copied") }) { Text("Copy log") }
+            OutlinedButton({
+                val text = logFile?.let { runCatching { it.readText() }.getOrNull() } ?: ("$app exited with code $code\n" + log.joinToString("\n"))
+                state.copyText(text.takeLast(60_000)); state.toast("Log copied")
+            }) { Text("Copy log") }
+            logFile?.let { f -> OutlinedButton({ state.open(KApp.KATE, f.path) }) { Text("Open") } }
             OutlinedButton(close) { Text("Close") }
         }
         Spacer(Modifier.height(10.dp))

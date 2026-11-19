@@ -262,12 +262,36 @@ class KdxState(app: Application) : AndroidViewModel(app) {
             runCatching {
                 withContext(Dispatchers.IO) {
                     disp.start((wDp * f).toInt(), (hDp * f).toInt())
-                    disp.relaunch = { start(disp) }
+                    disp.logFile = newLogFile(title)
+                    disp.relaunch = { disp.logFile = newLogFile(title); start(disp) }
                     disp.appProcess = start(disp)
                 }
             }.onFailure { e -> toast("Couldn't start $title: ${e.message}"); close(w) }
         }
     }
+
+    /**
+     * A log file for a Linux app run, in the DroidSystem folder (shared storage, so it can be opened in Dolphin/Kate
+     * or copied to a PC) – it keeps the app's output even if the app or KDX goes down.
+     */
+    private fun newLogFile(app: String): File? = runCatching {
+        val dir = droid?.let { File(it.home, "logs") } ?: debian?.let { File(it.root, "root/logs") } ?: return null
+        dir.mkdirs()
+        // keep the 30 newest logs
+        dir.listFiles()?.sortedByDescending { it.lastModified() }?.drop(29)?.forEach { it.delete() }
+        val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
+        val f = File(dir, app.replace(Regex("[^A-Za-z0-9._-]+"), "_") + "-$stamp.log")
+        val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val mi = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+        f.writeText(
+            "KDX ${org.kdx.shell.BuildConfig.VERSION_NAME} – $app – ${java.util.Date()}\n" +
+                "Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT}), " +
+                "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}, ${android.os.Build.SUPPORTED_ABIS.joinToString()}\n" +
+                "Memory: ${mi.availMem / 1048576} MiB free of ${mi.totalMem / 1048576} MiB${if (mi.lowMemory) " (LOW)" else ""}\n" +
+                "Kernel: ${System.getProperty("os.version")}\n----\n"
+        )
+        f
+    }.getOrNull()
 
     /** Runs a Debian GUI command (from a .desktop file or Konsole's `gui`) in its own window. */
     fun launchLinuxGui(cmd: String, title: String? = null, icon: File? = null) =
