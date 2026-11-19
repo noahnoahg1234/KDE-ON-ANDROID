@@ -57,7 +57,10 @@ Linux software:
   kernel features Android doesn't give apps, so KDX starts Flatpak apps itself in the same layout (runtime as `/usr`,
   app as `/app`, Flatpak's environment) using proot. It mounts **runtime and app extensions** (Mesa GL drivers,
   codecs, themes, plugins) the way Flatpak does, provides a **D-Bus session bus**, forces X11 for Wayland-first and
-  Electron apps, and turns off Chromium/Electron's internal sandbox (it needs kernel namespaces). Not supported:
+  Electron apps, and turns off Chromium/Electron's internal sandbox (it needs kernel namespaces). Libraries that
+  run helpers in their own bubblewrap sandbox – glycin (image loading in GNOME 47+ apps) and WebKitGTK – are given a
+  `bwrap` that reports "no namespaces", so they run the helpers directly instead of failing. Verified with
+  **Kitties** (`io.github.Micro856.KittiesGtk`, GNOME 51 runtime): it starts, fetches and shows pictures. Not supported:
   "extra-data" apps that download proprietary files at install time (they need bubblewrap), and apps that require a
   real GPU (rendering is software-only).
 - Installed Debian and Flatpak apps appear in **Kickoff → Applications → Linux** with their own icons.

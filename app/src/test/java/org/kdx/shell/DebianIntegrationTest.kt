@@ -214,4 +214,62 @@ class DebianIntegrationTest {
         assertTrue(out.contains("gl-extension"))
         assertTrue(out.contains("/usr/lib/GL/default/lib"))
     }
+
+    /** Runs an already-installed Flatpak (id from -Pkdx.flatpak) the way KDX does, for diagnosing app problems. */
+    @Test fun i_runInstalledFlatpak() {
+        val id = System.getProperty("kdx.flatpak")
+        assumeTrue(work != null && sys.isInstalled && id != null && sys.hasCommand("usr/bin/Xvnc"))
+        val base = LinuxDisplay(sys)
+        val fp = FlatpakRunner(sys, base)
+        assertNotNull("$id installed", fp.appDir(id!!))
+        val d = LinuxDisplay(sys, 4, appMode = true)
+        try {
+            d.start(900, 1200)
+            // inside this app's sandbox: is the network reachable, and is the session bus?
+            // test machines behind a TLS-inspecting proxy: let the sandbox trust it (phones don't need this)
+            val ca = System.getenv("KDX_EXTRA_CA")
+            // ...and only resolves names via its HTTPS proxy (phones resolve DNS normally)
+            val proxy = System.getenv("KDX_TEST_PROXY")
+            fun withCa(pb: ProcessBuilder) = pb.apply {
+                if (ca != null) command(command().take(1) + listOf("-b", "$ca:/etc/ssl/certs/ca-certificates.crt") + command().drop(1))
+                if (proxy != null) command().indexOf("/usr/bin/env").takeIf { it > 0 }?.let { i ->
+                    command().addAll(i + 2, listOf("https_proxy=$proxy", "http_proxy=$proxy", "HTTPS_PROXY=$proxy", "no_proxy=localhost,127.0.0.1,deb.debian.org"))
+                }
+            }
+            fun inSandbox(sh: String): String {
+                val pb = withCa(fp.command(id)); val cmd = pb.command()
+                val exe = cmd.indexOfLast { it.startsWith("/app/") || it.startsWith("/usr/") }
+                pb.command(cmd.subList(0, exe) + listOf("/bin/sh", "-c", sh))
+                val p = pb.start(); p.outputStream.close()
+                return p.inputStream.bufferedReader().readText().trim().also { p.waitFor() }
+            }
+            val net = inSandbox("curl -sS -o /dev/null -w '%{http_code}' --max-time 20 http://deb.debian.org/debian/dists/trixie/Release")
+            println("SANDBOX NET: $net")
+            val bus = inSandbox("gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus --method org.freedesktop.DBus.GetId")
+            println("SANDBOX DBUS: $bus")
+            println("SANDBOX ENV: " + inSandbox("env | grep -E 'GLYCIN|WEBKIT' | tr '\\n' ' '"))
+            println("SANDBOX HTTPS: " + inSandbox("curl -sS -o /dev/null -w '%{http_code}' --max-time 20 https://api.garythe.cat/gary"))
+            assertEquals("network works inside the Flatpak sandbox", "200", net.takeLast(3))
+            assertTrue("session bus works inside the Flatpak sandbox: $bus", bus.startsWith("('"))
+            d.appProcess = withCa(fp.command(id)).apply {
+                command().replaceAll { if (it == "DISPLAY=:1") "DISPLAY=:${d.display}" else it }
+                System.getProperty("kdx.debug")?.let { dbg -> command().indexOf("/usr/bin/env").takeIf { it > 0 }?.let { i -> command().add(i + 2, "G_MESSAGES_DEBUG=$dbg") } }
+            }.start().also { it.outputStream.close(); d.drain(it, id) }
+            Thread.sleep(System.getProperty("kdx.wait")?.toLong() ?: 12000)
+            println("TITLE: " + d.windowTitle())
+            println("ALIVE: " + d.appProcess!!.isAlive)
+            val rfb = RfbClient(port = d.port); rfb.connect()
+            val t = Thread { runCatching { rfb.loop() } }.apply { isDaemon = true; start() }
+            Thread.sleep(2500)
+            File(work, "app-$id.ppm").outputStream().buffered().use { o ->
+                o.write("P6 ${rfb.width} ${rfb.height} 255\n".toByteArray())
+                rfb.pixels.forEach { c -> o.write(c shr 16 and 0xFF); o.write(c shr 8 and 0xFF); o.write(c and 0xFF) }
+            }
+            rfb.close(); t.join(1000)
+        } finally {
+            d.log.filter { !it.startsWith("Xvnc") }.forEach { println("  LOG| $it") }
+            d.stop()
+            sys.run("pkill -f 'Xvnc :4'; pkill -f kdx-app.xml")
+        }
+    }
 }

@@ -247,6 +247,8 @@ class DebianSystem(
             |apt-get install -y tigervnc-standalone-server openbox dbus dbus-x11 x11-xserver-utils x11-utils xdotool fonts-dejavu-core adwaita-icon-theme
             |echo "Display server ready. Linux apps with windows now open in KDX's Linux Display."
             |""".trimMargin())
+        // same bwrap stand-in for Debian's own apps (see FlatpakRunner.NO_BWRAP)
+        tool("bwrap", FlatpakRunner.NO_BWRAP)
         tool("droidsystem-version", "#!/bin/sh\n. /etc/os-release\necho \"\$PRETTY_NAME\"\n")
         // Openbox for KDX app windows: KDX draws the title bar, so no decorations; main windows fill the screen
         File(root, LinuxDisplay.APP_RC).apply { parentFile?.mkdirs() }.writeText(
@@ -295,7 +297,7 @@ class DebianSystem(
 
     companion object {
         /** Bump when applyDroidLayer changes. 2: app-window Openbox config, xdotool/dbus in display-setup. */
-        const val LAYER_VERSION = 2
+        const val LAYER_VERSION = 3 // 3: bwrap stand-in
 
         /** Extracts a tar stream into [dest] preserving symlinks, hard links (as copies) and permission bits. */
         fun extractTar(input: InputStream, dest: File) {

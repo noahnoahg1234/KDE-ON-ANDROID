@@ -32,7 +32,8 @@ class LinuxDisplay(
 
     val env get() = mapOf(
         "DISPLAY" to ":$display", "XDG_RUNTIME_DIR" to "/tmp/runtime-root", "NO_AT_BRIDGE" to "1",
-        "DBUS_SESSION_BUS_ADDRESS" to "unix:path=/tmp/runtime-root/bus",
+        // abstract socket: no file path, so it works the same in DroidSystem and in every Flatpak sandbox
+        "DBUS_SESSION_BUS_ADDRESS" to SESSION_BUS,
         // X11 everywhere: there is no Wayland compositor
         "GDK_BACKEND" to "x11", "QT_QPA_PLATFORM" to "xcb", "SDL_VIDEODRIVER" to "x11", "CLUTTER_BACKEND" to "x11",
         "ELECTRON_OZONE_PLATFORM_HINT" to "x11", "MOZ_ENABLE_WAYLAND" to "0",
@@ -40,22 +41,23 @@ class LinuxDisplay(
         "LIBGL_ALWAYS_SOFTWARE" to "1", "GSK_RENDERER" to "cairo",
         // touch-friendly toolkits
         "GDK_SCALE" to "1", "QT_AUTO_SCREEN_SCALE_FACTOR" to "0",
+        // Libraries that start their own bubblewrap sandbox fail under proot (no kernel namespaces on Android):
+        // glycin = GNOME's image loader (every recent GNOME app that shows pictures), WebKitGTK web processes.
+        "GLYCIN_DISABLE_SANDBOX" to "1",
+        "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS" to "1", "WEBKIT_FORCE_SANDBOX" to "0",
     )
 
     /** One D-Bus session bus shared by all displays (many GTK/Qt/Flatpak apps need it). */
     private fun ensureSessionBus() {
         if (!sys.hasCommand("usr/bin/dbus-daemon")) return
-        if (File(sys.root, "tmp/runtime-root/bus").exists() && busProcess?.isAlive == true) return
         synchronized(LinuxDisplay::class.java) {
-            if (sharedBus?.isAlive == true) { busProcess = sharedBus; return }
-            File(sys.root, "tmp/runtime-root/bus").delete()
+            if (sharedBus?.isAlive == true) return
             sys.run("[ -s /etc/machine-id ] || dbus-uuidgen --ensure=/etc/machine-id; mkdir -p /var/lib/dbus; ln -sf /etc/machine-id /var/lib/dbus/machine-id")
-            sharedBus = sys.command(listOf("dbus-daemon", "--session", "--nofork", "--nopidfile", "--address=unix:path=/tmp/runtime-root/bus"))
+            // if a bus from an earlier run still owns the address, this one exits and the old one keeps serving
+            sharedBus = sys.command(listOf("dbus-daemon", "--session", "--nofork", "--nopidfile", "--address=$SESSION_BUS"))
                 .start().also { drain(it, "dbus") }
-            busProcess = sharedBus
         }
     }
-    @Volatile private var busProcess: Process? = null
 
     /** The active window's title (what KDX shows in its title bar), or null if unknown. */
     fun windowTitle(): String? {
@@ -88,7 +90,7 @@ class LinuxDisplay(
         }
         if (sys.hasCommand("usr/bin/openbox")) {
             val cfg = File(sys.root, APP_RC)
-            wm = if (appMode && cfg.isFile) launch("openbox --config-file /$APP_RC") else launch("openbox")
+            wm = if (appMode && cfg.isFile) launchRaw("openbox --config-file /$APP_RC", emptyMap()) else launchRaw("openbox", emptyMap())
         }
     }
 
@@ -97,6 +99,9 @@ class LinuxDisplay(
 
     /** Starts a GUI program on this display. */
     fun launch(cmd: String, extraEnv: Map<String, String> = emptyMap()): Process =
+        launchRaw(cmd, extraEnv).also { if (appMode) FlatpakRunner.gtkSettings(File(sys.root, "root/.config")) }
+
+    private fun launchRaw(cmd: String, extraEnv: Map<String, String>): Process =
         sys.command(listOf("/bin/bash", "-lc", "exec $cmd"), "/root", env + extraEnv).start().also { it.outputStream.close(); drain(it, cmd.substringBefore(' ')) }
 
     fun stop() {
@@ -107,6 +112,7 @@ class LinuxDisplay(
     companion object {
         /** Openbox config for app windows: no decorations, normal windows maximized (see DebianSystem.applyDroidLayer). */
         const val APP_RC = "etc/xdg/openbox/kdx-app.xml"
+        const val SESSION_BUS = "unix:abstract=/kdx/dbus-session"
         @Volatile private var sharedBus: Process? = null
     }
 
@@ -219,12 +225,22 @@ class FlatpakRunner(val sys: DebianSystem, private val display: LinuxDisplay) {
 
         val dataHome = "/root/.var/app/$id"
         listOf("config", "data", "cache").forEach { File(sys.root, "root/.var/app/$id/$it").mkdirs() }
+        // A bwrap that reports the standard "no namespaces" error, ahead of the runtime's real one: libraries that
+        // sandbox helpers with bubblewrap (glycin image loaders, WebKit…) then fall back to running them directly,
+        // instead of failing because bwrap can't work under proot.
+        File(sb, "run/kdx/bin").mkdirs()
+        File(sb, "run/kdx/bin/bwrap").apply { writeText(NO_BWRAP); setExecutable(true, false) }
+        // Flatpak normally generates this; without it fontconfig prints an error
+        File(sb, "run/host").mkdirs()
+        File(sb, "run/host/font-dirs.xml").takeIf { !it.exists() }
+            ?.writeText("<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n<fontconfig></fontconfig>\n")
+        gtkSettings(File(sys.root, "root/.var/app/$id/config"))
         val env = display.env + mapOf(
-            "PATH" to "/app/bin:/usr/bin", "FLATPAK_ID" to id, "container" to "flatpak",
+            "PATH" to "/app/bin:/run/kdx/bin:/usr/bin", "FLATPAK_ID" to id, "container" to "flatpak",
             "LD_LIBRARY_PATH" to (listOf("/app/lib", "/app/lib/$triplet") + ldExtra + "/usr/lib/$triplet/GL/default/lib").joinToString(":"),
             "XDG_DATA_DIRS" to "/app/share:/usr/share:/usr/share/runtime/share:/run/host/share",
             "XDG_CONFIG_HOME" to "$dataHome/config", "XDG_DATA_HOME" to "$dataHome/data", "XDG_CACHE_HOME" to "$dataHome/cache",
-            "GIO_USE_VFS" to "local", "GTK_USE_PORTAL" to "0",
+            "GIO_USE_VFS" to "local", "GTK_USE_PORTAL" to "0", "GTK_A11Y" to "none",
             // Chromium/Electron's own sandbox needs kernel namespaces Android doesn't give apps
             "ZYPAK_DISABLE_SANDBOX" to "1", "ELECTRON_DISABLE_SANDBOX" to "1", "ELECTRON_NO_SANDBOX" to "1",
             "QTWEBENGINE_DISABLE_SANDBOX" to "1", "MOZ_DISABLE_CONTENT_SANDBOX" to "1",
@@ -235,6 +251,22 @@ class FlatpakRunner(val sys: DebianSystem, private val display: LinuxDisplay) {
             .firstOrNull { File(sb, it).exists() || File(if (it.startsWith("/app")) File(app, "files") else runtime, it.substringAfter('/').substringAfter('/')).exists() }
             ?: "/app/bin/$command"
         return sys.command(listOf(exe) + args, "/root", env, rootfs = sb, binds = binds)
+    }
+
+    companion object {
+        const val NO_BWRAP = "#!/bin/sh\n# DroidSystem: bubblewrap needs kernel namespaces, which Android doesn't allow apps\n" +
+            "echo 'bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces.' >&2\nexit 1\n"
+
+        /**
+         * GTK apps draw their own minimize/maximize/close buttons; KDX's title bar already has them, so hide the
+         * app's (only if the user has no GTK settings yet).
+         */
+        fun gtkSettings(configHome: File) {
+            listOf("gtk-3.0", "gtk-4.0").forEach { v ->
+                val f = File(configHome, "$v/settings.ini")
+                if (!f.exists()) { f.parentFile?.mkdirs(); f.writeText("[Settings]\ngtk-decoration-layout=:\n") }
+            }
+        }
     }
 
     fun launch(id: String, args: List<String> = emptyList(), on: LinuxDisplay = display): Process {

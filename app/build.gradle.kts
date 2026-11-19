@@ -28,8 +28,8 @@ android {
         // Android 9 target, like Termux: apps targeting 10+ may not execute programs they download,
         // which DroidSystem needs to run Debian's Linux programs (via proot). Install by sideloading.
         targetSdk = 28
-        versionCode = 4
-        versionName = "2.1.0"
+        versionCode = 5
+        versionName = "2.1.1"
         // proot is bundled for these CPUs (see app/src/main/jniLibs)
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
     }
@@ -54,8 +54,11 @@ android {
             it.maxHeapSize = "2g"
             it.environment("LC_ALL", "C.UTF-8") // Debian packages contain UTF-8 file names
             System.getenv("KDX_EXTRA_CA")?.let { ca -> it.environment("KDX_EXTRA_CA", ca) }
+            System.getenv("KDX_TEST_PROXY")?.let { p -> it.environment("KDX_TEST_PROXY", p) }
             // Opt-in Debian/proot integration test: ./gradlew testDebugUnitTest -Pkdx.integration=/some/dir
             project.findProperty("kdx.integration")?.let { dir -> it.systemProperty("kdx.integration", dir.toString()); it.outputs.upToDateWhen { false } }
+            project.findProperty("kdx.flatpak")?.let { id -> it.systemProperty("kdx.flatpak", id.toString()) }
+            project.findProperty("kdx.debug")?.let { d -> it.systemProperty("kdx.debug", d.toString()) }
         }
     }
     packaging {
