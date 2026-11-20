@@ -440,4 +440,35 @@ class DebianIntegrationTest {
             sys.run("pkill -f 'Xvnc :6'; pkill -f 'Xvnc :7'; pkill -f /app/lib/firefox; pkill -f kdx-app.xml")
         }
     }
+
+    /** Auto mode with a struggling app: the AutoScaler should raise the frame rate by lowering the resolution. */
+    @Test fun n_autoScale() {
+        assumeTrue(work != null && sys.isInstalled && sys.hasCommand("usr/bin/glxgears"))
+        val d = LinuxDisplay(sys, 9, appMode = true)
+        try {
+            val w0 = 1280; val h0 = 960
+            d.start(w0, h0)
+            d.appProcess = d.launch("glxgears")
+            val rfb = RfbClient(port = d.port); rfb.connect()
+            val t = Thread { runCatching { rfb.loop() } }.apply { isDaemon = true; start() }
+            Thread.sleep(4000)
+            val scaler = org.kdx.shell.droid.AutoScaler()
+            val readings = mutableListOf<String>()
+            var firstFps = -1; var lastFps = 0
+            repeat(12) {
+                val f0 = rfb.frames; Thread.sleep(2000)
+                val fps = ((rfb.frames - f0) / 2).toInt()
+                if (firstFps < 0) firstFps = fps
+                lastFps = fps
+                if (scaler.update(fps)) rfb.setDesktopSize((w0 * scaler.scale).toInt() / 8 * 8, (h0 * scaler.scale).toInt())
+                readings += "$fps fps @ ${(scaler.scale * 100).toInt()}% (${rfb.width}x${rfb.height})"
+            }
+            println("AUTO: " + readings.joinToString(" | "))
+            rfb.close(); t.join(1000)
+            assertTrue("auto mode lowered the resolution", scaler.scale < 1f)
+            assertTrue("frame rate went up ($firstFps -> $lastFps)", lastFps > firstFps)
+        } finally {
+            d.stop(); sys.run("pkill -f 'Xvnc :9'; pkill glxgears; pkill -f kdx-app.xml")
+        }
+    }
 }

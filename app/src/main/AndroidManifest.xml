@@ -10,6 +10,10 @@
     <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
     <!-- Bazaar loads the Flathub app catalog -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- keep Linux apps running at full speed while they're open (see LinuxAppsService) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <queries>
         <intent>
@@ -51,6 +55,10 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".droid.LinuxAppsService"
+            android:exported="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

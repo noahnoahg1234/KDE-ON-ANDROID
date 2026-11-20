@@ -390,6 +390,19 @@ private fun LinuxSystemSection(state: KdxState) {
             DebianBlock(state)
             Toggle("Flatpak support", state.flatpakEnabled) { state.flatpakEnabled = it; state.save(); state.refreshLinuxApps() }
             Toggle("Sound from Linux apps", state.linuxSound) { state.setSound(it) }
+            Spacer(Modifier.height(6.dp))
+            Text("Linux app performance", color = c.text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Text("Linux apps draw on the CPU; fewer pixels means more frames per second. While Linux apps are open, " +
+                "KDX runs as a foreground service so Android gives them full speed.", color = c.inactiveText, fontSize = 12.sp)
+            org.kdx.shell.core.LinuxPerformance.entries.forEach { p ->
+                Row(Modifier.fillMaxWidth().clickable { state.setPerformance(p) }, verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(state.linuxPerformance == p, { state.setPerformance(p) })
+                    Column {
+                        Text(p.label, color = c.text, fontSize = 14.sp)
+                        Text(p.description, color = c.inactiveText, fontSize = 11.sp)
+                    }
+                }
+            }
             Toggle("Open Linux file types in Dolphin (.deb .dsp .desktop .sh .flatpakref .tar.*)", state.linuxFileTypes) {
                 state.linuxFileTypes = it; state.save()
             }

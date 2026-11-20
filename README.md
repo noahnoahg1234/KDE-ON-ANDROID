@@ -69,6 +69,12 @@ Linux software:
 - **Up to 60 fps**: the X server is capped at 60 fps and pushes frames as they change (RFB Continuous Updates +
   Fence); pixels arrive in Android's own byte order and go to a double-buffered Bitmap with one native copy. KDX's
   client sustains 60+ fps at 1280×800; the real rate depends on how fast the app itself draws (software rendering).
+- **Full speed for Linux apps**: while any Linux app is open, KDX runs as a foreground service (notification
+  "DroidSystem is running") so Android doesn't freeze, throttle or kill it, and holds a partial wake lock so apps keep
+  running with the screen off. **Auto performance mode** (default) watches each window's frame rate and lowers its
+  render resolution when an animating app can't reach 60 fps, raising it again when there's headroom (measured here:
+  a heavy software-3D app went from 13 to ~53 fps); Sharp / Balanced / Fast are fixed alternatives. Each app window
+  shows its current fps.
 - If a Linux app stops right after starting or with an error, its window stays open and explains why (e.g. Android
   ended it for memory, a blocked system call, a crash) with the app's log, **Restart** and **Copy log**. Not supported:
   "extra-data" apps that download proprietary files at install time (they need bubblewrap), and apps that require a

@@ -60,6 +60,11 @@ class DisplaySession : Closeable {
     var touchMode by mutableStateOf(true)
     var modifiers by mutableIntStateOf(0) // bit0 ctrl, bit1 alt, bit2 super (sticky)
     var onClose: () -> Unit = {}
+    /** Frames per second over the last measurement (shown in the toolbar). */
+    var fps by mutableIntStateOf(0)
+    /** Auto performance mode: this window's resolution factor (1 = full), lowered when it can't reach 60 fps. */
+    var autoScale by mutableFloatStateOf(1f)
+
     /** True once the app has shown a window (until then the window says it's starting). */
     var appReady by mutableStateOf(false)
     /** Set when the app stopped unexpectedly: exit code and its last log lines. */
@@ -187,6 +192,20 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
             return
         }
     }
+    // Frame rate + Auto mode: while the app animates (frames keep coming) but stays under ~50 fps, step its
+    // resolution down; once it holds 60 fps with room to spare, step back up. Idle apps send few frames and are
+    // left alone. Hysteresis (several readings in a row) avoids flip-flopping.
+    LaunchedEffect(s.connected) {
+        val scaler = org.kdx.shell.droid.AutoScaler(s.autoScale)
+        while (s.connected) {
+            val f0 = s.rfb?.frames ?: 0L
+            delay(2000)
+            val fps = (((s.rfb?.frames ?: 0L) - f0) / 2).toInt()
+            s.fps = fps
+            if (appNo == null || state.linuxPerformance != org.kdx.shell.core.LinuxPerformance.AUTO) continue
+            if (scaler.update(fps)) s.autoScale = scaler.scale
+        }
+    }
     val focus = remember { FocusRequester() }
     var typed by remember { mutableStateOf(TextFieldValue(" ")) }
     val density = LocalDensity.current.density
@@ -209,6 +228,11 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
             Text(if (s.touchMode) "Touch: tap, drag to scroll, hold for right-click, hold+drag to drag" else "Mouse: drag = drag, hold = right-click",
                 Modifier.weight(1f).padding(horizontal = 4.dp), color = c.inactiveText, fontSize = 11.sp, maxLines = 1)
             if (s.zoom > 1.01f) IconButton({ s.zoom = 1f; s.pan = Offset.Zero }, Modifier.size(40.dp)) { Icon(Icons.Filled.FitScreen, "Fit") }
+            if (s.connected) Text(
+                "${s.fps} fps" + if (appNo != null && state.linuxPerformance == org.kdx.shell.core.LinuxPerformance.AUTO && s.autoScale < 0.99f)
+                    " · ${(s.autoScale * 100).toInt()}%" else "",
+                Modifier.padding(horizontal = 6.dp), color = if (s.fps >= 55 || s.fps < 12) c.inactiveText else c.neutral, fontSize = 11.sp,
+            )
         }
         if (s.showKeys) LazyRow(Modifier.fillMaxWidth().background(c.header), horizontalArrangement = Arrangement.spacedBy(2.dp),
             contentPadding = PaddingValues(horizontal = 4.dp)) {
@@ -224,11 +248,11 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
             val bmp = s.bitmap
             var size by remember { mutableStateOf(IntSize.Zero) }
             // app windows: make the X screen match this window's shape (debounced)
-            if (appNo != null) LaunchedEffect(size, s.connected) {
+            if (appNo != null) LaunchedEffect(size, s.connected, s.autoScale, state.linuxPerformance) {
                 if (!s.connected || size.width == 0) return@LaunchedEffect
                 delay(500)
                 val wDp = size.width / density; val hDp = size.height / density
-                val f = state.xScale(wDp)
+                val f = state.xScale(wDp) * (if (state.linuxPerformance == org.kdx.shell.core.LinuxPerformance.AUTO) s.autoScale else 1f)
                 s.rfb?.setDesktopSize(((wDp * f).toInt() / 8 * 8).coerceIn(320, 3840), (hDp * f).toInt().coerceIn(240, 2160))
             }
             if (bmp == null || !s.connected) {

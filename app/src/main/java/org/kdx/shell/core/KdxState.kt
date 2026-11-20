@@ -263,13 +263,20 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     /** Stops an app window's display (called when its KDX window closes). */
     fun releaseDisplay(n: Int) {
         appDisplays.remove(n)?.let { d -> viewModelScope.launch(Dispatchers.IO) { d.stop() } }
+        org.kdx.shell.droid.LinuxAppsService.update(ctx, appDisplays.size)
     }
 
     /**
      * X screen size for a window [widthDp] x [heightDp]: desktop apps expect ~800px or more, so on phones one
      * X pixel is a bit smaller than a dp (the window scales the picture to fit).
      */
-    fun xScale(widthDp: Float): Float = maxOf(1.25f, 820f / widthDp.coerceAtLeast(1f))
+    fun xScale(widthDp: Float): Float = maxOf(1.25f, 820f / widthDp.coerceAtLeast(1f)) * linuxPerformance.scale
+
+    /** How Linux app windows trade sharpness for speed. */
+    var linuxPerformance by mutableStateOf(
+        LinuxPerformance.entries.getOrElse(prefs.getInt("linuxPerf", 0)) { LinuxPerformance.AUTO })
+
+    fun setPerformance(p: LinuxPerformance) { linuxPerformance = p; prefs.edit().putInt("linuxPerf", p.ordinal).apply() }
 
     private fun displaySetUp(deb: org.kdx.shell.droid.DebianSystem): Boolean {
         if (deb.hasCommand("usr/bin/Xvnc")) return true
@@ -285,6 +292,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         val n = (2..63).first { !appDisplays.containsKey(it) && !File(deb.root, "tmp/.X$it-lock").exists() }
         val disp = org.kdx.shell.droid.LinuxDisplay(deb, n, appMode = true)
         appDisplays[n] = disp
+        org.kdx.shell.droid.LinuxAppsService.update(ctx, appDisplays.size)
         val dm = ctx.resources.displayMetrics
         val wDp = dm.widthPixels / dm.density
         val hDp = (dm.heightPixels / dm.density - 140f).coerceAtLeast(300f)
@@ -663,7 +671,20 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         windows.forEach { it.dispose() }
         appDisplays.values.forEach { runCatching { it.stop() } }
+        org.kdx.shell.droid.LinuxAppsService.update(ctx, 0)
         androidAudio.stop(); linuxAudio?.stop()
         linuxDisplay?.stop()
     }
+}
+
+
+/**
+ * Render resolution for Linux app windows. Apps draw in software on the CPU, so fewer pixels = more frames.
+ * AUTO starts sharp and lowers/raises each window's resolution to keep it near 60 fps (see LinuxDisplayApp).
+ */
+enum class LinuxPerformance(val label: String, val scale: Float, val description: String) {
+    AUTO("Auto (keep 60 fps)", 1f, "Lowers a window's resolution when it drops below 60 fps, raises it again when there's room"),
+    SHARP("Sharp", 1f, "Full resolution"),
+    BALANCED("Balanced", 0.75f, "75% resolution – faster"),
+    FAST("Fast", 0.55f, "55% resolution – fastest, softer picture"),
 }
