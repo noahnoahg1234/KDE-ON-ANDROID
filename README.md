@@ -75,6 +75,14 @@ Linux software:
   render resolution when an animating app can't reach 60 fps, raising it again when there's headroom (measured here:
   a heavy software-3D app went from 13 to ~53 fps); Sharp / Balanced / Fast are fixed alternatives. Each app window
   shows its current fps.
+- **On-screen keyboard**: Linux app windows show the keyboard whenever they're active (and bring it back after taps);
+  the window shrinks above it and the app resizes. Toolbar button / Settings switch to turn it off.
+- **More file types in Dolphin** (with DroidSystem 2): `.AppImage` runs in its own window (it unpacks itself, no
+  FUSE needed), Linux programs (ELF) run in Konsole, scripts (`.py .pl .rb .js .lua .php .tcl .sh`) ask Run/Edit and
+  install their interpreter on first use, `.jar` runs with Java, `.deb` installs through Debian's real apt, `.flatpak`
+  bundles and `.flatpakref` go to real Flatpak, fonts (`.ttf .otf .woff`) install for Linux apps, `.apk` opens Android's
+  installer, and ISO/RAR/zstd/lz4/CAB/LHA/XAR archives extract through Debian's bsdtar. Windows `.exe`/`.msi` get an
+  explanation.
 - If a Linux app stops right after starting or with an error, its window stays open and explains why (e.g. Android
   ended it for memory, a blocked system call, a crash) with the app's log, **Restart** and **Copy log**. Not supported:
   "extra-data" apps that download proprietary files at install time (they need bubblewrap), and apps that require a

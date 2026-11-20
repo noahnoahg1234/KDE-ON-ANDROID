@@ -672,6 +672,10 @@ class DroidSystem(private val ctx: Context, val root: File) {
                 m('B'.code, 'Z'.code, 'h'.code) -> "bzip2-compressed data"
                 m(0x28, 0xB5, 0x2F, 0xFD) -> "zstd-compressed data (not supported by DroidSystem)"
                 m('7'.code, 'z'.code, 0xBC, 0xAF) -> "7-Zip archive – extract with: extract ${f.name}"
+                m('M'.code, 'Z'.code) -> "Windows program (PE). Android and Linux can't run Windows programs directly; " +
+                    "look for a Linux, Flatpak or Android version (Wine on ARM phones isn't supported by DroidSystem)."
+                m(0xD0, 0xCF, 0x11, 0xE0) && f.extension.equals("msi", true) -> "Windows installer (MSI) – not usable on Android/Linux."
+                m('R'.code, 'a'.code, 'r'.code, '!'.code) -> "RAR archive – extract with: extract ${f.name}"
                 m('P'.code, 'K'.code, 3, 4) -> "Zip archive" + when (f.extension.lowercase()) { "jar" -> " (Java archive)"; "apk" -> " (Android app – open it from Dolphin)"; "epub" -> " (e-book)"; else -> "" }
                 m('h'.code, 's'.code, 'q'.code, 's'.code) -> "SquashFS file system image (used by Snap/AppImage); not mountable on Android"
                 String(iso) == "CD001" -> "ISO 9660 disc image (e.g. a Linux installer); flash it from a PC, it can't boot inside Android"

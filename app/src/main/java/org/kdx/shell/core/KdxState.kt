@@ -122,6 +122,9 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     var linuxFileTypes by mutableStateOf(prefs.getBoolean("linuxTypes", true))
     /** Bazaar shows the online Flathub catalog. */
     var flathubEnabled by mutableStateOf(prefs.getBoolean("flathub", true))
+    /** Show the on-screen keyboard whenever a Linux app window is active. */
+    var linuxKeyboard by mutableStateOf(prefs.getBoolean("linuxKeyboard", true))
+    fun changeLinuxKeyboard(on: Boolean) { linuxKeyboard = on; prefs.edit().putBoolean("linuxKeyboard", on).apply() }
     /** Play Linux apps' sound through the phone. */
     var linuxSound by mutableStateOf(prefs.getBoolean("linuxSound", true))
     val flathub by lazy { org.kdx.shell.droid.Flathub(app) }

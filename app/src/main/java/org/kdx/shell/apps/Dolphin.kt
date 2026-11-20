@@ -104,16 +104,27 @@ fun linuxCommand(f: File): String? {
     val q = org.kdx.shell.droid.DroidShell.quote(f.path)
     val n = f.name.lowercase()
     if (n.contains(".pkg.tar.")) return "dspkg install $q"
+    if (n.endsWith(".tar.zst") || n.endsWith(".tar.lz4") || n.endsWith(".tar.lzma") || n.endsWith(".tar.lz")) return "extract $q"
     return when (f.extension.lowercase()) {
         "desktop" -> "run-desktop $q"
-        "sh", "bash", "ksh", "zsh" -> "sh $q"
-        "deb", "dsp", "rpm" -> "dspkg install $q"
-        "flatpakref", "flatpak", "flatpakrepo" -> "flatpak install $q"
-        "appimage", "snap", "so", "elf", "bin", "run", "ko", "iso", "img", "squashfs", "sfs", "a", "o" -> "linuxinfo $q"
-        "7z", "gz", "xz", "bz2", "cpio", "jar", "war", "zst", "lz4" -> "extract $q"
+        // programs and scripts run in DroidSystem 2 (Debian), with the interpreter installed on first use
+        "sh", "bash", "ksh", "zsh", "fish", "py", "pl", "rb", "js", "mjs", "lua", "php", "tcl" -> "run-script $q"
+        "jar" -> "run-script $q"
+        "appimage" -> "appimage-run $q"
+        "run", "bin", "elf", "x86_64", "aarch64" -> "run-linux $q"
+        // packages: Debian's real apt for .deb; DroidSystem's own installer for the others
+        "deb" -> "deb-install $q"
+        "dsp", "rpm" -> "dspkg install $q"
+        "flatpakref", "flatpak" -> "flatpak install -y $q"
+        "flatpakrepo" -> "flatpak remote-add $q"
+        // fonts for Linux apps
+        "ttf", "otf", "ttc", "woff", "woff2", "pfb" -> "font-install $q"
+        // archives: built-in for common ones, Debian's bsdtar for the rest (ISO, RAR, zstd, lz4, CAB, LHA, XAR…)
+        "7z", "gz", "xz", "bz2", "cpio", "war", "zst", "tzst", "lz4", "iso", "rar", "cab", "lzh", "lha", "xar", "arj", "lzma", "lz", "tlz", "z" -> "extract $q"
+        "snap", "so", "ko", "img", "squashfs", "sfs", "a", "o", "exe", "msi", "dll", "dmg" -> "linuxinfo $q"
         else -> when {
             f.isArchive() -> "extract $q"
-            f.length() in 4..(512L * 1024 * 1024) && org.kdx.shell.droid.DroidSystem.isElf(f) -> "linuxinfo $q"
+            f.length() in 4..(512L * 1024 * 1024) && org.kdx.shell.droid.DroidSystem.isElf(f) -> "run-linux $q"
             else -> null
         }
     }
@@ -129,7 +140,12 @@ private fun iconFor(f: File): ImageVector = when {
     f.extension.lowercase() in setOf("7z", "jar", "cpio", "gz", "xz", "bz2") -> Icons.Filled.FolderZip
     f.extension.lowercase() == "desktop" -> Icons.Filled.RocketLaunch
     f.extension.lowercase() in setOf("sh", "bash") -> Icons.Filled.Terminal
-    f.extension.lowercase() == "appimage" -> Icons.Filled.Memory
+    f.extension.lowercase() == "appimage" -> Icons.Filled.RocketLaunch
+    f.extension.lowercase() in setOf("ttf", "otf", "ttc", "woff", "woff2", "pfb") -> Icons.Filled.FontDownload
+    f.extension.lowercase() in setOf("py", "pl", "rb", "js", "mjs", "lua", "php", "tcl", "fish", "zsh") -> Icons.Filled.Code
+    f.extension.lowercase() in setOf("rar", "zst", "tzst", "lz4", "cab", "lzh", "lha", "xar", "arj", "lzma", "lz") -> Icons.Filled.FolderZip
+    f.extension.lowercase() == "apk" -> Icons.Filled.Android
+    f.extension.lowercase() in setOf("exe", "msi", "dll") -> Icons.Filled.DesktopWindows
     f.isImageFile() -> Icons.Filled.Image
     f.extension.lowercase() in setOf("mp3", "ogg", "flac", "wav", "m4a", "opus") -> Icons.Filled.MusicNote
     f.extension.lowercase() in setOf("mp4", "mkv", "webm", "avi", "mov") -> Icons.Filled.Movie
@@ -180,6 +196,7 @@ fun Dolphin(state: KdxState, w: KWindow) {
     }
     var dialog by remember { mutableStateOf<String?>(null) } // "newFolder", "newFile", "rename"
     var props by remember { mutableStateOf<File?>(null) }
+    var runOrEdit by remember { mutableStateOf<Pair<File, String>?>(null) }
     var confirmDelete by remember { mutableStateOf<List<File>?>(null) }
     var filterOpen by remember { mutableStateOf(false) }
 
@@ -206,6 +223,9 @@ fun Dolphin(state: KdxState, w: KWindow) {
     fun open(f: File) {
         val linuxCmd = if (linux && f.isFile) linuxCommand(f) else null
         when {
+            f.isFile && f.extension.equals("apk", true) -> installApk(state, ctx, f)
+            // scripts: ask, like KDE's Dolphin does, whether to run or edit
+            linuxCmd != null && linuxCmd.startsWith("run-script") && f.extension.lowercase() != "jar" -> runOrEdit = f to linuxCmd
             linuxCmd != null -> state.open(KApp.KONSOLE, linuxCmd)
             f.isDirectory -> s.go(f)
             f.isImageFile() -> state.open(KApp.GWENVIEW, f.path)
@@ -450,6 +470,15 @@ fun Dolphin(state: KdxState, w: KWindow) {
             dismissButton = { TextButton({ confirmDelete = null }) { Text("Cancel") } },
         )
     }
+    runOrEdit?.let { (f, cmd) ->
+        AlertDialog(
+            onDismissRequest = { runOrEdit = null },
+            title = { Text(f.name) },
+            text = { Text("This is a script. Run it in DroidSystem, or open it in Kate?") },
+            confirmButton = { TextButton({ runOrEdit = null; state.open(KApp.KONSOLE, cmd) }) { Text("Run") } },
+            dismissButton = { TextButton({ runOrEdit = null; state.open(KApp.KATE, f.path) }) { Text("Open in Kate") } },
+        )
+    }
     props?.let { f ->
         val size by produceState<Long?>(null, f) { value = withContext(Dispatchers.IO) { f.walkTopDown().filter { it.isFile }.sumOf { it.length() } } }
         AlertDialog(
@@ -481,4 +510,15 @@ private fun FileThumb(f: File, sizeDp: Int) {
         }
     }
     Icon(iconFor(f), null, tint = if (f.isDirectory) c.accent else c.inactiveText, modifier = Modifier.size(sizeDp.dp))
+}
+
+/** Opens Android's package installer for an .apk file. */
+fun installApk(state: KdxState, ctx: android.content.Context, f: File) {
+    runCatching {
+        val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
+        ctx.startActivity(
+            Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    }.onFailure { state.toast("Can't open the Android installer: ${it.message}") }
 }

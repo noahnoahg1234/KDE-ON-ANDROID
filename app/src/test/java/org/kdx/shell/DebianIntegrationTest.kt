@@ -471,4 +471,30 @@ class DebianIntegrationTest {
             d.stop(); sys.run("pkill -f 'Xvnc :9'; pkill glxgears; pkill -f kdx-app.xml")
         }
     }
+
+    /** The Debian side of Dolphin's new file types (the same commands DroidShell runs). */
+    @Test fun o_fileTypes() {
+        assumeTrue(work != null && sys.isInstalled)
+        val shared = File(work, "home/files").apply { deleteTree(); mkdirs() } // = /home/user/files in DroidSystem
+        // 1. .deb via Debian's apt (dependencies resolved, program runs)
+        val pkg = File(shared, "hello-kdx").apply { File(this, "DEBIAN").mkdirs(); File(this, "usr/bin").mkdirs() }
+        File(pkg, "DEBIAN/control").writeText("Package: hello-kdx\nVersion: 1.0\nArchitecture: all\nMaintainer: KDX <kdx@example.org>\nDepends: bash\nDescription: test\n")
+        File(pkg, "usr/bin/hello-kdx").apply { writeText("#!/bin/sh\necho hello from a deb\n"); setExecutable(true, false) }
+        assertEquals(0, sys.run("cd /home/user/files && dpkg-deb --build hello-kdx hello-kdx.deb >/dev/null && apt-get install -y /home/user/files/hello-kdx.deb", ::log))
+        assertEquals("hello from a deb", sys.query("hello-kdx").second.trim())
+        // 2. a Python script: interpreter installed on first use, then run
+        File(shared, "hi.py").writeText("print('python says hi', 6*7)\n")
+        val (_, pout) = sys.query("command -v python3 >/dev/null || { apt-get update -qq && apt-get install -y python3 >/dev/null; } && python3 /home/user/files/hi.py")
+        println("PYTHON: ${pout.lines().lastOrNull { it.isNotBlank() }}")
+        assertTrue(pout.contains("python says hi 42"))
+        // 3. a .tar.zst archive via bsdtar (installed on first use)
+        assertEquals(0, sys.run("command -v bsdtar >/dev/null || apt-get install -y libarchive-tools zstd; " +
+            "cd /home/user/files && mkdir -p z && echo zstd-ok > z/inside.txt && tar --zstd -cf z.tar.zst z && rm -r z && " +
+            "mkdir -p out && bsdtar -xvf z.tar.zst -C out", ::log))
+        assertEquals("zstd-ok", File(shared, "out/z/inside.txt").readText().trim())
+        // 4. a program copied to private storage runs (shared storage can't run programs on Android)
+        val prog = File(sys.root, "root/bin/hello-prog").apply { parentFile?.mkdirs(); File(sys.root, "usr/bin/true").copyTo(this, overwrite = true); setExecutable(true, false) }
+        assertEquals(0, sys.query("/root/bin/hello-prog").first)
+        prog.delete()
+    }
 }

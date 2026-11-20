@@ -54,7 +54,10 @@ class DisplaySession : Closeable {
     var connected by mutableStateOf(false)
     var zoom by mutableFloatStateOf(1f)
     var pan by mutableStateOf(Offset.Zero)
-    var keyboard by mutableStateOf(false)
+    /** On-screen keyboard for the app (on by default, see KdxState.linuxKeyboard). */
+    var keyboard by mutableStateOf(true)
+    /** Bumped on every tap in the app, to bring the keyboard back if Android hid it. */
+    var tapCount by mutableIntStateOf(0)
     var showKeys by mutableStateOf(false)
     /** Touch mode: drag scrolls like a touchscreen. Mouse mode: drag = mouse drag. */
     var touchMode by mutableStateOf(true)
@@ -131,7 +134,12 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
     val appNo = w.arg?.takeIf { it.startsWith("app:") }?.removePrefix("app:")?.toIntOrNull()
     val disp: LinuxDisplay? = if (appNo != null) state.appDisplay(appNo) else state.linuxDisplay
     val s = remember(w) {
-        w.retain("display") { DisplaySession().also { ds -> if (appNo != null) ds.onClose = { state.releaseDisplay(appNo) } } }
+        w.retain("display") {
+            DisplaySession().also { ds ->
+                ds.keyboard = state.linuxKeyboard
+                if (appNo != null) ds.onClose = { state.releaseDisplay(appNo) }
+            }
+        }
     }
     if (disp == null) {
         Box(Modifier.fillMaxSize().background(c.window).padding(24.dp), Alignment.Center) {
@@ -207,13 +215,27 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
         }
     }
     val focus = remember { FocusRequester() }
+    val ime = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    // Keep the on-screen keyboard up while this Linux app window is the active one: when it becomes active, when
+    // it connects, and after every tap inside the app (Android sometimes hides the keyboard on its own).
+    val isActive = state.activeId == w.id
+    LaunchedEffect(isActive, s.keyboard, s.connected, s.tapCount) {
+        if (isActive && s.keyboard && s.connected) {
+            delay(120)
+            runCatching { focus.requestFocus() }
+            ime?.show()
+        }
+    }
     var typed by remember { mutableStateOf(TextFieldValue(" ")) }
     val density = LocalDensity.current.density
 
     Column(Modifier.fillMaxSize().background(Color.Black)) {
         // toolbar
         Row(Modifier.fillMaxWidth().background(c.header).padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton({ s.keyboard = !s.keyboard; if (s.keyboard) runCatching { focus.requestFocus() } }, Modifier.size(40.dp)) {
+            IconButton({
+                s.keyboard = !s.keyboard
+                if (s.keyboard) { runCatching { focus.requestFocus() }; ime?.show() } else ime?.hide()
+            }, Modifier.size(40.dp)) {
                 Icon(Icons.Filled.Keyboard, "Keyboard", tint = if (s.keyboard) c.accent else c.text)
             }
             IconButton({ s.touchMode = !s.touchMode }, Modifier.size(40.dp)) {
@@ -269,7 +291,7 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
                 Canvas(
                     Modifier.fillMaxSize()
                         .onSizeChanged { size = it }
-                        .pointerInput(bmp, s.touchMode) { awaitEachGesture { gesture(s, ::toFb) } }
+                        .pointerInput(bmp, s.touchMode) { awaitEachGesture { gesture(s, ::toFb); s.tapCount++ } }
                 ) {
                     s.frame // redraw on every frame
                     drawContext.canvas.save()

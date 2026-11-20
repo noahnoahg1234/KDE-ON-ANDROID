@@ -390,6 +390,7 @@ private fun LinuxSystemSection(state: KdxState) {
             DebianBlock(state)
             Toggle("Flatpak support", state.flatpakEnabled) { state.flatpakEnabled = it; state.save(); state.refreshLinuxApps() }
             Toggle("Sound from Linux apps", state.linuxSound) { state.setSound(it) }
+            Toggle("Always show the on-screen keyboard in Linux apps", state.linuxKeyboard) { state.changeLinuxKeyboard(it) }
             Spacer(Modifier.height(6.dp))
             Text("Linux app performance", color = c.text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
             Text("Linux apps draw on the CPU; fewer pixels means more frames per second. While Linux apps are open, " +

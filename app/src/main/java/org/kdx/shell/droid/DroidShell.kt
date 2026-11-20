@@ -4,6 +4,7 @@ import android.os.Build
 import org.kdx.shell.apps.KonsoleSession
 import org.kdx.shell.core.KdxState
 import java.io.File
+import kotlinx.coroutines.launch
 
 /** DroidSystem's userland commands, available in Konsole when the Linux system is enabled. */
 object DroidShell {
@@ -60,6 +61,42 @@ object DroidShell {
         "linuxinfo", "file", "bazaar", "kdx-app",
     )
 
+    /** Interpreters for scripts, with the Debian package that provides each. */
+    private val interpreters = mapOf(
+        "py" to ("python3" to "python3"), "pl" to ("perl" to "perl"), "rb" to ("ruby" to "ruby"),
+        "js" to ("node" to "nodejs"), "mjs" to ("node" to "nodejs"), "lua" to ("lua5.4" to "lua5.4"),
+        "php" to ("php" to "php-cli"), "tcl" to ("tclsh" to "tcl"), "jar" to ("java -jar" to "default-jre-headless"),
+        "sh" to ("bash" to "bash"), "bash" to ("bash" to "bash"), "zsh" to ("zsh" to "zsh"), "fish" to ("fish" to "fish"),
+    )
+
+    /** A host file's path as DroidSystem (Debian) sees it. Shared storage is mounted at the same path. */
+    private fun guestPath(deb: DebianSystem, f: File): String =
+        f.absolutePath.let { p -> if (p.startsWith(deb.root.absolutePath + "/")) p.removePrefix(deb.root.absolutePath) else p }
+
+    /** CPU architecture of an ELF file, in Debian's naming, or null. */
+    private fun elfArch(f: File): String? = runCatching {
+        if (!DroidSystem.isElf(f)) return null
+        val h = ByteArray(20); f.inputStream().use { it.read(h) }
+        when ((h[18].toInt() and 0xFF) or ((h[19].toInt() and 0xFF) shl 8)) {
+            0x3E -> "amd64"; 0xB7 -> "arm64"; 0x28 -> "armhf"; 0x03 -> "i386"; else -> "unknown"
+        }
+    }.getOrNull()
+
+    private fun archMismatch(s: KonsoleSession, deb: DebianSystem, f: File): Boolean {
+        val a = elfArch(f) ?: return false
+        if (a == deb.arch || (deb.arch == "arm64" && a == "armhf")) return false
+        s.println("${f.name} is built for $a, but this phone runs ${deb.arch}. Get the ${deb.arch.replace("arm64", "aarch64").replace("amd64", "x86_64")} version.", 2)
+        return true
+    }
+
+    /** Copies [f] into DroidSystem's private storage (shared storage can't run programs) and makes it executable. */
+    private fun stage(deb: DebianSystem, f: File, dir: String): String {
+        val dest = File(deb.root, "root/$dir/${f.name}")
+        if (f.absolutePath != dest.absolutePath) { dest.parentFile?.mkdirs(); f.copyTo(dest, overwrite = true) }
+        dest.setExecutable(true, false)
+        return "/root/$dir/${f.name}"
+    }
+
     /** Index of the first unquoted '|' that is not part of '||', or -1. */
     private fun pipeIndex(line: String): Int {
         var q: Char? = null
@@ -107,6 +144,56 @@ object DroidShell {
                 state.launchLinuxGui(line.substringAfter(argv[0]).trim())
             }
             "linux-display" -> state.open(org.kdx.shell.core.KApp.LINUXDISPLAY)
+            // ---- opening Linux files (used by Dolphin) ----
+            "appimage-run" -> {
+                val f = args.firstOrNull()?.let { file(s, it) } ?: return usage(s, "appimage-run <file.AppImage>")
+                if (deb == null) return err(s, "AppImages need DroidSystem 2 (Debian). Turn on the Linux system in System Settings.")
+                if (archMismatch(s, deb, f)) return true
+                s.background { log ->
+                    log("Preparing ${f.name}…")
+                    val path = stage(deb, f, "Applications")
+                    log("Starting ${f.nameWithoutExtension} in its own window (unpacked on each start, so it needs no FUSE)")
+                    // type-2 AppImages can unpack themselves instead of mounting with FUSE, which Android doesn't allow
+                    state.launchLinuxGui("APPIMAGE_EXTRACT_AND_RUN=1 NO_CLEANUP=1 ${quote(path)}",
+                        f.nameWithoutExtension.substringBefore('-').substringBefore('_'))
+                }
+            }
+            "deb-install" -> {
+                val f = args.firstOrNull()?.let { file(s, it) } ?: return usage(s, "deb-install <file.deb>")
+                if (deb == null) return handle(s, state, ds, "dspkg install ${quote(f.path)}")
+                // Debian's own apt installs it with its dependencies, and its programs really run
+                s.exec("apt-get install -y ${quote(guestPath(deb, f))}")
+            }
+            "run-script" -> {
+                val f = args.firstOrNull()?.let { file(s, it) } ?: return usage(s, "run-script <file>")
+                val shebang = runCatching { f.bufferedReader().readLine() }.getOrNull()?.takeIf { it.startsWith("#!") }
+                val ext = f.extension.lowercase()
+                if (deb == null) {
+                    if (ext == "sh" || shebang?.contains("sh") == true) { s.exec("sh ${quote(f.path)}"); return true }
+                    return err(s, "Running .$ext files needs DroidSystem 2 (Debian). Turn on the Linux system in System Settings.")
+                }
+                val (cmd, pkg) = interpreters[ext]
+                    ?: shebang?.let { sb -> interpreters.values.firstOrNull { (c, _) -> sb.contains(c.substringBefore(' ')) } }
+                    ?: ("bash" to "bash")
+                val tool = cmd.substringBefore(' ')
+                s.exec("command -v $tool >/dev/null || { echo 'Installing $pkg…'; apt-get update -qq && apt-get install -y $pkg; } && $cmd ${quote(guestPath(deb, f))}")
+            }
+            "run-linux" -> {
+                val f = args.firstOrNull()?.let { file(s, it) } ?: return usage(s, "run-linux <program>")
+                if (deb == null) return err(s, "Linux programs need DroidSystem 2 (Debian). Turn on the Linux system in System Settings.")
+                if (archMismatch(s, deb, f)) return true
+                val path = stage(deb, f, "bin")
+                s.println("Running ${f.name} (copied to $path – shared storage can't run programs)", 2)
+                s.exec("${quote(path)} ${args.drop(1).joinToString(" ") { quote(it) }}")
+            }
+            "font-install" -> {
+                val f = args.firstOrNull()?.let { file(s, it) } ?: return usage(s, "font-install <font file>")
+                if (deb == null) return err(s, "Installing fonts needs DroidSystem 2 (Debian).")
+                val dir = File(deb.root, "root/.local/share/fonts").apply { mkdirs() }
+                f.copyTo(File(dir, f.name), overwrite = true)
+                s.println("Installed ${f.name} for Linux apps (Debian and Flatpak).", 2)
+                s.exec("command -v fc-cache >/dev/null && fc-cache -f ~/.local/share/fonts >/dev/null; echo done")
+            }
             "bazaar" -> state.open(org.kdx.shell.core.KApp.BAZAAR)
             "kdx-app" -> runCatching { state.open(org.kdx.shell.core.KApp.valueOf(args.first().uppercase())) }
                 .onFailure { s.println("kdx-app: unknown app ${args.firstOrNull() ?: ""}", 2) }
@@ -132,9 +219,17 @@ object DroidShell {
                 val f = args.firstOrNull()?.let { file(s, it) } ?: return usage(s, "extract <archive> [dir]")
                 val dest = args.getOrNull(1)?.let { file(s, it) }
                     ?: File(f.parentFile, f.name.replace(Regex("\\.(tar\\.(gz|xz|bz2)|tgz|txz|tbz2|tar|zip|dsp)$", RegexOption.IGNORE_CASE), ""))
-                s.background { log ->
-                    val n = ds.extract(f, dest.apply { mkdirs() })
-                    log("Extracted $n files to ${dest.path}")
+                val viaBsdtar = deb != null && Regex(".*\\.(iso|rar|zst|tzst|lz4|cab|lzh|lha|xar|arj|lzma|tlz|lz|z|warc|pkg|dmg|mtree)$", RegexOption.IGNORE_CASE).matches(f.name)
+                fun bsdtar() {
+                    // libarchive's bsdtar reads ISO, RAR, zstd, lz4, CAB, LHA, XAR, … – installed on first use
+                    s.exec("command -v bsdtar >/dev/null || { echo 'Installing libarchive-tools…'; apt-get update -qq && apt-get install -y libarchive-tools; } && " +
+                        "mkdir -p ${quote(guestPath(deb!!, dest))} && bsdtar -xvf ${quote(guestPath(deb, f))} -C ${quote(guestPath(deb, dest))} && echo 'Extracted to ${dest.path}'")
+                }
+                if (viaBsdtar) bsdtar()
+                else s.background { log ->
+                    val n = runCatching { ds.extract(f, dest.apply { mkdirs() }) }
+                    n.onSuccess { log("Extracted $it files to ${dest.path}") }
+                        .onFailure { e -> if (deb != null) s.scope.launch { bsdtar() } else log("E: ${e.message}") }
                 }
             }
             "linuxinfo", "file" -> {
