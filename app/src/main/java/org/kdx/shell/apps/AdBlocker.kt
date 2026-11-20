@@ -82,6 +82,8 @@ fun AdBlocker(state: KdxState) {
         scope.launch(Dispatchers.IO) { AdBlockService.reload(ctx) }
     }
 
+    // Android's "Private DNS" with a specific server sends lookups past any DNS-based blocker
+    val privateDns = remember { runCatching { Settings.Global.getString(ctx.contentResolver, "private_dns_mode") }.getOrNull() }
     LaunchedEffect(Unit) {
         while (true) {
             running = AdBlockService.isRunning
@@ -93,8 +95,6 @@ fun AdBlocker(state: KdxState) {
             delay(1500)
         }
     }
-    // Android's "Private DNS" with a specific server sends lookups past any DNS-based blocker
-    val privateDns = remember { runCatching { Settings.Global.getString(ctx.contentResolver, "private_dns_mode") }.getOrNull() }
 
     Column(Modifier.fillMaxSize().background(c.window).verticalScroll(rememberScrollState()).padding(14.dp)) {
         Row(
@@ -121,6 +121,27 @@ fun AdBlocker(state: KdxState) {
                 Modifier.weight(1f).padding(horizontal = 8.dp), color = c.text, fontSize = 12.sp)
             TextButton({ runCatching { ctx.startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }) { Text("Settings") }
         }
+        // Self-test: does a normal lookup of an ad domain get blocked?
+        var test by remember { mutableStateOf<String?>(null) }
+        Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton({
+                test = "Testing…"
+                scope.launch {
+                    val ip = withContext(Dispatchers.IO) { AdBlockService.selfTest() }
+                    test = when {
+                        ip == null -> "✓ Working: ad domains are blocked for apps that use Android's DNS."
+                        !running -> "The blocker is off – doubleclick.net resolved to $ip."
+                        privateDns == "hostname" -> "✗ Not in the DNS path: Android's Private DNS bypasses it (doubleclick.net → $ip). Set Private DNS to Off or Automatic."
+                        else -> "✗ Not blocking (doubleclick.net → $ip). Turn the blocker off and on again; if another VPN app is active, close it."
+                    }
+                }
+            }) { Text("Test blocking") }
+            test?.let { Text(it, Modifier.padding(start = 10.dp), color = if (it.startsWith("✓")) c.positive else c.text, fontSize = 12.sp) }
+        }
+        if (running) Text(
+            "Apps that were already open remember ad addresses for a while: restart them (or toggle airplane mode) after turning the blocker on.",
+            color = c.inactiveText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp),
+        )
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Stat(Modifier.weight(1f), "%,d".format(blocked), "ads & trackers blocked")
@@ -154,6 +175,23 @@ fun AdBlocker(state: KdxState) {
                     }
                 }, enabled = !updating) { Text(if (updating) "Updating…" else "Update list") }
             }
+        }
+
+        Section2("Stop apps from going around the blocker") {
+            var blockDoh by remember { mutableStateOf(prefs.getBoolean("blockDoh", true)) }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Block apps' private DNS (DNS-over-HTTPS)", color = c.text, fontSize = 14.sp)
+                    Text("Browsers like Chrome and Firefox and some apps can look names up with their own DNS service, " +
+                        "skipping the blocker. With this on they fall back to normal DNS.", color = c.inactiveText, fontSize = 11.sp)
+                }
+                Switch(blockDoh, { on ->
+                    blockDoh = on; prefs.edit().putBoolean("blockDoh", on).apply()
+                    scope.launch(Dispatchers.IO) { AdBlockService.reload(ctx) }
+                })
+            }
+            Text("In Chrome also check Settings → Privacy and security → Use secure DNS: set it to \"With your current service provider\".",
+                color = c.inactiveText, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
         }
 
         Section2("Allowed sites (never blocked)") {

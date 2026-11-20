@@ -144,4 +144,13 @@ class AdBlockTest {
         assertEquals(listOf("ad.doubleclick.net"), blockedNames)
         server.close(); t.join(1000)
     }
+
+    @Test fun privateDnsServersAndFirefoxCanaryAreBlocked() {
+        val b = Blocklist(org.kdx.shell.droid.AdBlockService.PRIVATE_DNS_HOSTS)
+        assertTrue(b.isBlocked("use-application-dns.net"))
+        assertTrue(b.isBlocked("mozilla.cloudflare-dns.com"))
+        assertTrue(b.isBlocked("dns.google"))
+        assertFalse(b.isBlocked("google.com"))
+        assertFalse(b.isBlocked("cloudflare.com"))
+    }
 }

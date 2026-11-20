@@ -148,8 +148,34 @@ class AdBlockService : VpnService() {
             val domains = if (updated.isFile) updated.inputStream().use { Blocklist.parse(it) }
             // bundled list: gzip data under a name the Android build tools don't treat specially (".gz" assets get renamed)
             else runCatching { ctx.assets.open("adblock/blocklist.bin").use { Blocklist.parseGzip(it) } }.getOrDefault(emptyList())
-            return Blocklist(domains, allowList(ctx), if (updated.isFile) "updated ${java.util.Date(updated.lastModified())}" else "bundled with KDX")
+            val extra = if (prefs(ctx).getBoolean("blockDoh", true)) PRIVATE_DNS_HOSTS else listOf(DOH_CANARY)
+            return Blocklist(domains + extra, allowList(ctx), if (updated.isFile) "updated ${java.util.Date(updated.lastModified())}" else "bundled with KDX")
         }
+
+        /**
+         * Firefox's "canary": when it doesn't resolve, Firefox turns its built-in DNS-over-HTTPS off and uses the
+         * system DNS (= the blocker). https://support.mozilla.org/kb/canary-domain-use-application-dnsnet
+         */
+        const val DOH_CANARY = "use-application-dns.net"
+
+        /**
+         * Public DNS-over-HTTPS/TLS servers that apps and browsers use to look names up directly, skipping Android's
+         * DNS (and so the blocker). When their names don't resolve, apps fall back to normal DNS.
+         */
+        val PRIVATE_DNS_HOSTS = listOf(
+            DOH_CANARY, "dns.google", "dns.google.com", "8888.google", "cloudflare-dns.com", "mozilla.cloudflare-dns.com",
+            "chrome.cloudflare-dns.com", "one.one.one.one", "1dot1dot1dot1.cloudflare-dns.com", "security.cloudflare-dns.com",
+            "family.cloudflare-dns.com", "dns.quad9.net", "dns9.quad9.net", "dns10.quad9.net", "dns11.quad9.net",
+            "doh.opendns.com", "dns.opendns.com", "doh.cleanbrowsing.org", "dns.nextdns.io", "doh.dns.sb", "dns.adguard.com",
+            "dns.adguard-dns.com", "doh.mullvad.net", "dns.mullvad.net", "doh.xfinity.com", "dns.controld.com",
+            "doh.libredns.gr", "dns.alidns.com", "doh.pub", "dns.twnic.tw", "doh.ffmuc.net", "odvr.nic.cz",
+        )
+
+        /**
+         * Checks that the blocker is really in Android's DNS path: looks up a known ad domain through the normal
+         * system resolver (like any app would). Returns null when it's blocked, else the address it resolved to.
+         */
+        fun selfTest(): String? = runCatching { java.net.InetAddress.getByName("doubleclick.net").hostAddress }.getOrNull()
 
         /** Reloads the list into a running blocker (after an update or allow-list change). */
         fun reload(ctx: Context) { if (isRunning) current = loadList(ctx) }
