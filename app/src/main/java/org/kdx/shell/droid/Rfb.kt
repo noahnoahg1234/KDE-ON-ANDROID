@@ -164,8 +164,25 @@ class RfbClient(private val host: String = "127.0.0.1", private val port: Int) {
     }
 
     // ------------------------------------------------------------------ input
-    private inline fun send(block: () -> Unit) {
-        synchronized(lock) { runCatching { block(); out.flush() } }
+    /**
+     * Every outgoing message (taps, keys, resize, update requests) is written by one background thread, in order.
+     * Android forbids socket I/O on the main thread (NetworkOnMainThreadException), and input is sent from the UI
+     * thread – writing directly there silently dropped every tap and key press, so apps looked frozen.
+     */
+    private val outbox = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "rfb-send").apply { isDaemon = true } }
+
+    /** Thread that performed the last write (for tests). */
+    @Volatile internal var lastSendThread: String = ""
+
+    private fun send(block: () -> Unit) {
+        runCatching {
+            outbox.execute {
+                synchronized(lock) {
+                    runCatching { block(); out.flush(); lastSendThread = Thread.currentThread().name }
+                        .onFailure { if (running) android.util.Log.w("KDX-RFB", "send failed: $it") }
+                }
+            }
+        }
     }
 
     /** buttons: bit0 left, bit1 middle, bit2 right, bit3/4 wheel up/down. */
@@ -197,7 +214,8 @@ class RfbClient(private val host: String = "127.0.0.1", private val port: Int) {
 
     fun close() {
         running = false
-        runCatching { sock.close() }
+        runCatching { outbox.execute { runCatching { sock.close() } } }.onFailure { runCatching { sock.close() } }
+        outbox.shutdown()
     }
 
     companion object {
