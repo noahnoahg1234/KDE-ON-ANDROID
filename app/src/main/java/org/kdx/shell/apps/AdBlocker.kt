@@ -57,6 +57,11 @@ fun AdBlocker(state: KdxState) {
     var listInfo by remember { mutableStateOf("") }
     var updating by remember { mutableStateOf(false) }
     var newAllow by remember { mutableStateOf("") }
+    var smart by remember { mutableStateOf(AdBlockService.smartEnabled(ctx)) }
+    var learned by remember { mutableStateOf(emptyList<String>()) }
+    var pausedLeft by remember { mutableLongStateOf(0) }
+    var excluded by remember { mutableStateOf(AdBlockService.excludedApps(ctx)) }
+    var picking by remember { mutableStateOf(false) }
 
     fun turnOn() {
         prefs.edit().putBoolean("enabled", true).apply()
@@ -89,6 +94,8 @@ fun AdBlocker(state: KdxState) {
             running = AdBlockService.isRunning
             queries = AdBlockService.queries.get(); blocked = AdBlockService.blocked.get()
             recent = AdBlockService.recentlyBlocked().take(30)
+            learned = withContext(Dispatchers.IO) { AdBlockService.learned(ctx) }
+            pausedLeft = (AdBlockService.pausedUntil - System.currentTimeMillis()).coerceAtLeast(0)
             val l = AdBlockService.current
             listInfo = if (l != null) "${"%,d".format(l.size)} domains · ${l.source}"
                 else withContext(Dispatchers.IO) { AdBlockService.loadList(ctx).let { "${"%,d".format(it.size)} domains · ${it.source}" } }
@@ -138,6 +145,21 @@ fun AdBlocker(state: KdxState) {
             }) { Text("Test blocking") }
             test?.let { Text(it, Modifier.padding(start = 10.dp), color = if (it.startsWith("✓")) c.positive else c.text, fontSize = 12.sp) }
         }
+        if (running) Row(
+            Modifier.fillMaxWidth().padding(top = 10.dp).clip(RoundedCornerShape(8.dp))
+                .background(if (pausedLeft > 0) c.neutral.copy(alpha = 0.15f) else c.header).padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(if (pausedLeft > 0) Icons.Filled.PauseCircle else Icons.Filled.PlayCircle, null, tint = c.text)
+            Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
+                Text(if (pausedLeft > 0) "Paused – ads load for %d:%02d more".format(pausedLeft / 60_000, pausedLeft / 1000 % 60)
+                    else "Want to watch a reward ad?", color = c.text, fontSize = 14.sp)
+                Text(if (pausedLeft > 0) "Blocking turns back on by itself." else "Pause blocking so the ad can play and the app gives you its reward.",
+                    color = c.inactiveText, fontSize = 11.sp)
+            }
+            if (pausedLeft > 0) TextButton({ AdBlockService.resume(); pausedLeft = 0 }) { Text("Resume") }
+            else TextButton({ AdBlockService.pause(5); pausedLeft = 5 * 60_000L; state.toast("Ads allowed for 5 minutes") }) { Text("Pause 5 min") }
+        }
         if (running) Text(
             "Apps that were already open remember ad addresses for a while: restart them (or toggle airplane mode) after turning the blocker on.",
             color = c.inactiveText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp),
@@ -158,6 +180,54 @@ fun AdBlocker(state: KdxState) {
                     TextButton({ saveAllow(allow.toSet() + d); state.toast("Allowed $d") }) { Text("Allow") }
                 }
             }
+        }
+
+        Section2("Smart blocking") {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Learn new ad servers instantly", color = c.text, fontSize = 14.sp)
+                    Text("While an ad plays, new ad and tracking servers it contacts are blocked right away and remembered. " +
+                        "Names that clearly belong to ad networks are always blocked. Core services (Google APIs, app stores) never are.",
+                        color = c.inactiveText, fontSize = 11.sp)
+                }
+                Switch(smart, { on -> smart = on; AdBlockService.setSmart(ctx, on) })
+            }
+            if (learned.isNotEmpty()) {
+                Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Learned servers (${learned.size})", Modifier.weight(1f), color = c.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    TextButton({ scope.launch(Dispatchers.IO) { AdBlockService.forget(ctx) }; learned = emptyList() }) { Text("Forget all") }
+                }
+                learned.take(50).forEach { d ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(d, Modifier.weight(1f), color = c.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        TextButton({
+                            scope.launch(Dispatchers.IO) { AdBlockService.forget(ctx, listOf(d)) }
+                            learned = learned - d; saveAllow(allow.toSet() + d); state.toast("Allowed $d")
+                        }) { Text("Allow") }
+                    }
+                }
+            }
+        }
+
+        Section2("Apps where ads aren't blocked") {
+            Text("These apps skip the blocker completely, so their ads (and reward ads) work. All other apps stay blocked.",
+                color = c.inactiveText, fontSize = 12.sp)
+            val pm = ctx.packageManager
+            excluded.sorted().forEach { pkg ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    val label = remember(pkg) { runCatching { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg) }
+                    Column(Modifier.weight(1f)) {
+                        Text(label, color = c.text, fontSize = 13.sp)
+                        Text(pkg, color = c.inactiveText, fontSize = 11.sp)
+                    }
+                    IconButton({ excluded = excluded - pkg; AdBlockService.setExcluded(ctx, excluded) }) { Icon(Icons.Filled.Close, "Remove") }
+                }
+            }
+            TextButton({ picking = true }) { Icon(Icons.Filled.Add, null); Text("Add app") }
+        }
+        if (picking) AppPicker(excluded, { picking = false }) { pkg ->
+            picking = false; excluded = excluded + pkg; AdBlockService.setExcluded(ctx, excluded)
+            state.toast("Ads in this app are no longer blocked")
         }
 
         Section2("Blocklist") {
@@ -223,6 +293,41 @@ fun AdBlocker(state: KdxState) {
                 color = c.inactiveText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
         }
     }
+}
+
+/** Lists installed apps (with a launcher icon) to pick one. */
+@Composable
+private fun AppPicker(skip: Set<String>, onDismiss: () -> Unit, onPick: (String) -> Unit) {
+    val c = LocalBreeze.current
+    val ctx = LocalContext.current
+    var apps by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
+    var filter by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        apps = withContext(Dispatchers.IO) {
+            val pm = ctx.packageManager
+            pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+                .map { it.activityInfo.packageName to it.loadLabel(pm).toString() }
+                .distinctBy { it.first }.filter { it.first != ctx.packageName && it.first !in skip }
+                .sortedBy { it.second.lowercase() }
+        }
+    }
+    AlertDialog(onDismissRequest = onDismiss, confirmButton = { TextButton(onDismiss) { Text("Cancel") } },
+        title = { Text("Don't block ads in…") },
+        text = {
+            Column {
+                OutlinedTextField(filter, { filter = it }, Modifier.fillMaxWidth(), placeholder = { Text("Search apps") }, singleLine = true)
+                Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState())) {
+                    val list = apps
+                    if (list == null) Text("Loading…", color = c.inactiveText)
+                    else list.filter { filter.isBlank() || it.second.contains(filter, true) || it.first.contains(filter, true) }.forEach { (pkg, label) ->
+                        Column(Modifier.fillMaxWidth().clickable { onPick(pkg) }.padding(vertical = 8.dp)) {
+                            Text(label, color = c.text, fontSize = 14.sp)
+                            Text(pkg, color = c.inactiveText, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        })
 }
 
 @Composable

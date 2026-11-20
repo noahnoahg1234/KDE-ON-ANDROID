@@ -52,6 +52,7 @@ class AdBlockService : VpnService() {
             .addAddress("fd00:6b64:78::1", 128)
             .addDnsServer(DNS6).addRoute(DNS6, 128)
             .setBlocking(true)
+            .apply { excludedApps(this@AdBlockService).forEach { runCatching { addDisallowedApplication(it) } } }
             .apply { runCatching { setMetered(false) } }
             .establish() ?: return
         tun = fd
@@ -86,7 +87,14 @@ class AdBlockService : VpnService() {
                 }
             }.getOrNull()
         }
-        val engine = DnsEngine(current ?: loadList(this), forward) { name -> blocked.incrementAndGet(); remember(name) }
+        val learner = learner(this)
+        val engine = DnsEngine(current ?: loadList(this), forward, { name -> blocked.incrementAndGet(); remember(name) }) { name, onList ->
+            when {
+                isPaused() -> false
+                smartEnabled(this) -> learner.check(name, onList)
+                else -> onList
+            }
+        }
         while (running) {
             val n = runCatching { input.read(buf) }.getOrDefault(-1)
             if (n < 0) break
@@ -139,6 +147,45 @@ class AdBlockService : VpnService() {
         }
 
         fun prefs(ctx: Context) = ctx.getSharedPreferences("adblock", Context.MODE_PRIVATE)
+
+        // --- smart blocking: learns new ad servers while ads play ---
+        fun smartEnabled(ctx: Context) = prefs(ctx).getBoolean("smart", true)
+        fun setSmart(ctx: Context, on: Boolean) = prefs(ctx).edit().putBoolean("smart", on).apply()
+        private fun learnedFile(ctx: Context) = File(ctx.filesDir, "adblock/learned.txt")
+        @Volatile private var learnerRef: AdLearner? = null
+
+        fun learner(ctx: Context): AdLearner = learnerRef ?: synchronized(this) {
+            learnerRef ?: run {
+                val f = learnedFile(ctx)
+                val saved = if (f.isFile) f.readLines().map { it.trim() }.filter { it.isNotEmpty() } else emptyList()
+                val app = ctx.applicationContext
+                AdLearner(saved, allowList(ctx)) { learnedFile(app).apply { parentFile?.mkdirs() }.appendText("$it\n") }
+                    .also { learnerRef = it }
+            }
+        }
+
+        /** Servers learned while ads played, sorted. */
+        fun learned(ctx: Context): List<String> = learner(ctx).learned.sorted()
+
+        /** Forgets learned servers ([names] = null forgets all); rebuilds the learner. */
+        fun forget(ctx: Context, names: Collection<String>? = null) {
+            val keep = if (names == null) emptyList() else learned(ctx) - names.toSet()
+            learnedFile(ctx).apply { parentFile?.mkdirs() }.writeText(keep.joinToString("") { "$it\n" })
+            learnerRef = null
+        }
+
+        // --- pause: lets ads load for a few minutes (e.g. to watch a reward ad) ---
+        @Volatile var pausedUntil = 0L; private set
+        fun isPaused() = System.currentTimeMillis() < pausedUntil
+        fun pause(minutes: Int) { pausedUntil = System.currentTimeMillis() + minutes * 60_000L }
+        fun resume() { pausedUntil = 0L }
+
+        // --- apps whose ads are not blocked (they bypass the VPN entirely) ---
+        fun excludedApps(ctx: Context): Set<String> = prefs(ctx).getStringSet("excluded", emptySet()) ?: emptySet()
+        fun setExcluded(ctx: Context, pkgs: Set<String>) {
+            prefs(ctx).edit().putStringSet("excluded", pkgs.toSet()).apply()
+            if (isRunning) { stop(ctx); android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ start(ctx) }, 800) }
+        }
         fun upstreamDns(ctx: Context): String = prefs(ctx).getString("upstream", "1.1.1.1") ?: "1.1.1.1"
         fun allowList(ctx: Context): Set<String> = prefs(ctx).getStringSet("allow", emptySet()) ?: emptySet()
 
@@ -178,7 +225,7 @@ class AdBlockService : VpnService() {
         fun selfTest(): String? = runCatching { java.net.InetAddress.getByName("doubleclick.net").hostAddress }.getOrNull()
 
         /** Reloads the list into a running blocker (after an update or allow-list change). */
-        fun reload(ctx: Context) { if (isRunning) current = loadList(ctx) }
+        fun reload(ctx: Context) { learnerRef = null; if (isRunning) current = loadList(ctx) }
 
         fun start(ctx: Context) = ctx.startForegroundService(Intent(ctx, AdBlockService::class.java))
 

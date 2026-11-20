@@ -133,7 +133,7 @@ class AdBlockTest {
             }
         }
         val blockedNames = mutableListOf<String>()
-        val engine = DnsEngine(Blocklist(listOf("doubleclick.net")), forward) { blockedNames += it }
+        val engine = DnsEngine(Blocklist(listOf("doubleclick.net")), forward, onBlocked = { blockedNames += it })
         val blockedReply = engine.handle(ipv4Udp(question("ad.doubleclick.net")))!!
         assertEquals(3, blockedReply[28 + 3].toInt() and 0x0F) // NXDOMAIN, without asking the server
         val okReply = engine.handle(ipv4Udp(question("example.com", id = 0x0102)))!!
@@ -152,5 +152,69 @@ class AdBlockTest {
         assertTrue(b.isBlocked("dns.google"))
         assertFalse(b.isBlocked("google.com"))
         assertFalse(b.isBlocked("cloudflare.com"))
+    }
+}
+
+class AdLearnerTest {
+    @Test fun clearAdNetworkNamesAreBlockedAnyTime() {
+        val l = org.kdx.shell.droid.AdLearner()
+        assertTrue(l.check("sdk.applovin.com", onList = false, now = 0))
+        assertTrue(l.check("ads.newnetwork.io", onList = false, now = 0))
+        assertTrue(l.check("adservice-eu.somegame.net", onList = false, now = 0))
+        assertFalse(l.check("api.somegame.net", onList = false, now = 0))
+        assertFalse("'adobe', 'address' are not ads", l.check("address.adobe.com", onList = false, now = 0))
+    }
+
+    @Test fun duringAnAdNewAdLikeServersAreLearnedInstantly() {
+        val learned = mutableListOf<String>()
+        val l = org.kdx.shell.droid.AdLearner(onLearned = { learned += it })
+        assertFalse("before any ad: allowed", l.check("cdn-track.newvendor.com", onList = false, now = 0))
+        assertTrue(l.check("ad.doubleclick.net", onList = true, now = 1_000))          // an ad starts
+        assertTrue(l.check("impression.newvendor.com", onList = false, now = 3_000))   // ad-like, during the ad
+        assertTrue(l.check("video.doubleclick.net", onList = false, now = 4_000))      // same company as the ad server
+        assertFalse(l.check("api.game.com", onList = false, now = 5_000))              // ordinary name: allowed
+        assertFalse(l.check("www.googleapis.com", onList = false, now = 5_000))        // protected
+        assertFalse("window over", l.check("pixel.othervendor.com", onList = false, now = 30_000))
+        assertTrue("remembered after the ad", l.check("impression.newvendor.com", onList = false, now = 99_000))
+        assertEquals(listOf("impression.newvendor.com", "video.doubleclick.net"), learned)
+    }
+
+    @Test fun allowListWins() {
+        val l = org.kdx.shell.droid.AdLearner(allow = setOf("ads.mysite.com"))
+        assertFalse(l.check("ads.mysite.com", onList = false, now = 0))
+    }
+
+    @Test fun registrableRoots() {
+        assertEquals("example.com", org.kdx.shell.droid.AdLearner.root("a.b.example.com"))
+        assertEquals("example.co.uk", org.kdx.shell.droid.AdLearner.root("x.example.co.uk"))
+    }
+}
+
+class SmartDnsEngineTest {
+    @Test fun learnedServersGetNxdomainAndPauseLetsEverythingThrough() {
+        val l = org.kdx.shell.droid.AdLearner()
+        var paused = false
+        val engine = org.kdx.shell.droid.DnsEngine(org.kdx.shell.droid.Blocklist(listOf("doubleclick.net")), { it },
+            decide = { name, onList -> if (paused) false else l.check(name, onList) })
+        assertTrue(engine.isBlockedQuery(query("ads.unknownnet.io"), query("ads.unknownnet.io").size))
+        assertFalse(engine.isBlockedQuery(query("example.com"), query("example.com").size))
+        paused = true
+        assertFalse(engine.isBlockedQuery(query("doubleclick.net"), query("doubleclick.net").size))
+    }
+
+    private fun query(name: String): ByteArray {
+        // minimal IPv4/UDP DNS query packet
+        val dns = java.io.ByteArrayOutputStream().apply {
+            write(byteArrayOf(0x12, 0x34, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0))
+            name.split('.').forEach { write(it.length); write(it.toByteArray()) }
+            write(byteArrayOf(0, 0, 1, 0, 1))
+        }.toByteArray()
+        val udpLen = 8 + dns.size; val total = 20 + udpLen
+        val p = ByteArray(total)
+        p[0] = 0x45; p[2] = (total shr 8).toByte(); p[3] = total.toByte(); p[8] = 64; p[9] = 17
+        byteArrayOf(10, 111, 222.toByte(), 1).copyInto(p, 12); byteArrayOf(10, 111, 222.toByte(), 2).copyInto(p, 16)
+        p[20] = 0x30; p[21] = 0x39; p[23] = 53; p[24] = (udpLen shr 8).toByte(); p[25] = udpLen.toByte()
+        dns.copyInto(p, 28)
+        return p
     }
 }

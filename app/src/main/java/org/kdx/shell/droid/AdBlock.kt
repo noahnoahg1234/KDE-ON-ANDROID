@@ -187,15 +187,104 @@ class DnsEngine(
     var list: Blocklist,
     private val forward: (ByteArray) -> ByteArray?,
     private val onBlocked: (String) -> Unit = {},
+    /** Final say on blocking, given the name and whether it is on the list (smart learning, pause). */
+    private val decide: (String, Boolean) -> Boolean = { _, onList -> onList },
 ) {
     /** Returns the reply packet for [packet], or null when it isn't a DNS query (or the upstream didn't answer). */
     fun handle(packet: ByteArray, len: Int = packet.size): ByteArray? {
         val q = DnsPackets.parse(packet, len) ?: return null
-        if (list.isBlocked(q.name)) { onBlocked(q.name); return DnsPackets.reply(q, DnsPackets.nxdomain(q.dns)) }
+        if (decide(q.name, list.isBlocked(q.name))) { onBlocked(q.name); return DnsPackets.reply(q, DnsPackets.nxdomain(q.dns)) }
         val answer = forward(q.dns) ?: return null
         return DnsPackets.reply(q, answer)
     }
 
     /** True when [packet] is a DNS query that will be blocked (lets the VPN answer inline, without a thread). */
-    fun isBlockedQuery(packet: ByteArray, len: Int): Boolean = DnsPackets.parse(packet, len)?.let { list.isBlocked(it.name) } ?: false
+    fun isBlockedQuery(packet: ByteArray, len: Int): Boolean = DnsPackets.parse(packet, len)?.let { decide(it.name, list.isBlocked(it.name)) } ?: false
+}
+
+/**
+ * Learns new ad servers while ads play. When an app contacts a server on the blocklist, the next [windowMs] count as
+ * "ad activity": new servers looked up then whose names look ad-related, or that belong to the same company as the ad
+ * server, are blocked at once and remembered. Names that clearly belong to ad networks are blocked any time.
+ * Core services (app stores, Google APIs, CDNs most apps need) are never learned.
+ */
+class AdLearner(
+    learned: Collection<String> = emptyList(),
+    private val allow: Set<String> = emptySet(),
+    private val windowMs: Long = 15_000,
+    private val onLearned: (String) -> Unit = {},
+) {
+    private val learnedSet = java.util.concurrent.ConcurrentHashMap.newKeySet<String>().apply { addAll(learned) }
+    private val adRoots = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    @Volatile private var adActiveUntil = 0L
+
+    val learned: Set<String> get() = learnedSet
+
+    /** Called for every lookup; returns true when the name should be blocked (already learned or learned now). */
+    fun check(name: String, onList: Boolean, now: Long = System.currentTimeMillis()): Boolean {
+        val n = name.lowercase().trimEnd('.')
+        if (onList) { adActiveUntil = now + windowMs; adRoots += root(n); return true }
+        if (protected(n) || matchesUp(n, allow)) return false
+        if (matchesUp(n, learnedSet)) return true
+        val tokens = n.split('.', '-', '_')
+        val learn = tokens.any { it in STRONG || STRONG_PREFIX.any { p -> it.startsWith(p) } } ||
+            (now < adActiveUntil && (tokens.any { it in WEAK } || root(n) in adRoots))
+        if (learn) { learnedSet += n; onLearned(n) }
+        return learn
+    }
+
+    private fun matchesUp(name: String, set: Set<String>): Boolean {
+        if (set.isEmpty()) return false
+        var d = name
+        while (true) {
+            if (d in set) return true
+            val dot = d.indexOf('.'); if (dot < 0) return false
+            d = d.substring(dot + 1)
+        }
+    }
+
+    private fun protected(n: String) = PROTECTED.any { n == it || n.endsWith(".$it") }
+
+    companion object {
+        /** "a.b.example.co.uk" -> "example.co.uk", "x.ads.example.com" -> "example.com". */
+        fun root(n: String): String {
+            val p = n.split('.')
+            if (p.size <= 2) return n
+            val two = p.takeLast(2)
+            val secondLevel = two[0] in setOf("co", "com", "net", "org", "gov", "ac", "edu") && two[1].length == 2
+            return p.takeLast(if (secondLevel) 3 else 2).joinToString(".")
+        }
+
+        /** Name parts that mean "ad server" on their own. */
+        val STRONG = setOf(
+            "ad", "ads", "adserver", "adservers", "adservice", "adservices", "adsystem", "adsrvr", "adnxs", "adnetwork",
+            "advert", "adverts", "advertising", "advertiser", "adx", "adtech", "adclick", "adclicks", "adtrack", "adtracking",
+            "pagead", "pagead2", "doubleclick", "googlesyndication", "googleadservices", "admob", "applovin", "applvn",
+            "vungle", "chartboost", "tapjoy", "adcolony", "inmobi", "mintegral", "unityads", "ironsource", "supersonicads",
+            "fyber", "pangle", "pangleglobal", "mopub", "smaato", "startappservice", "adjust", "appsflyer", "kochava",
+            "branchster", "moatads", "scorecardresearch", "taboola", "outbrain", "criteo", "pubmatic", "rubiconproject",
+            "openx", "adsafeprotected", "serving-sys", "flashtalking", "yieldmo", "bidswitch", "casalemedia", "liftoff",
+            "bidmachine", "verve", "smartadserver", "adform", "teads", "spotx", "spotxchange", "springserve",
+        )
+        val STRONG_PREFIX = listOf("adserv", "adsrv", "advert", "adsystem", "adtrack")
+
+        /** Ad-ish name parts, only trusted while an ad is playing. */
+        val WEAK = setOf(
+            "track", "tracker", "tracking", "trk", "analytics", "metrics", "telemetry", "pixel", "pixels", "beacon",
+            "beacons", "impression", "impressions", "imp", "click", "clicks", "clk", "promo", "promos", "sponsor",
+            "sponsored", "rtb", "bid", "bidder", "bidding", "prebid", "vast", "vpaid", "creative", "creatives", "banner",
+            "banners", "events", "event", "collector", "collect", "stats", "stat", "log", "logs", "reward", "rewarded",
+            "interstitial", "mediation", "sdk", "attribution", "install", "conversion",
+        )
+
+        /** Never learned: things apps and Android need to work. */
+        val PROTECTED = listOf(
+            "googleapis.com", "gstatic.com", "google.com", "android.com", "gvt1.com", "gvt2.com", "ggpht.com",
+            "googleusercontent.com", "googlevideo.com", "youtube.com", "play.google.com", "android.clients.google.com",
+            "firebaseio.com", "firebasestorage.googleapis.com", "apple.com", "icloud.com", "microsoft.com", "windows.net",
+            "cloudflare.com", "akamaihd.net", "akamaized.net", "cloudfront.net", "fastly.net", "amazonaws.com",
+            "github.com", "githubusercontent.com", "flathub.org", "debian.org", "mozilla.org", "mozilla.net",
+            "whatsapp.net", "whatsapp.com", "telegram.org", "signal.org", "fbcdn.net",
+        )
+    }
 }

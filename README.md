@@ -152,6 +152,14 @@ turns itself back on after a reboot. Limits: ads served from the same servers as
 told apart by DNS, Android's "Private DNS" set to a specific server bypasses it, and it can't run alongside another
 VPN app.
 
+**Smart blocking** (on by default) learns new ad servers instantly: when an app contacts a known ad server, the next
+15 seconds count as "ad playing", and new servers looked up then with ad-like names (`impression`, `pixel`, `vast`,
+`bid`…) or from the same company are blocked at once and remembered. Names that clearly belong to ad networks
+(`ads`, `adserver`, `applovin`, `unityads`…) are blocked any time; core services (Google APIs, app stores, big CDNs)
+never are. Learned servers are listed with an "Allow" button. To get an app's reward for watching an ad, use
+**Pause 5 min** (blocking resumes by itself) or add the app to **Apps where ads aren't blocked**, which takes it out
+of the VPN entirely.
+
 ## Install
 Download `app-release.apk` from the latest **Build KDX** run in GitHub Actions (artifact `KDX-apk`) and install it.
 To use KDX as your home screen: *Kickoff → Leave → Default Home App*, then choose **KDX**.
