@@ -51,6 +51,7 @@ fun AppContent(state: KdxState, w: KWindow) {
         KApp.LINUXDISPLAY -> LinuxDisplayApp(state, w)
         KApp.ADBLOCK -> AdBlocker(state)
         KApp.PRIVACY -> PrivacyVpnApp(state)
+        KApp.PLASMA -> {} // opens as a full-screen Linux display (KdxState.launchPlasma)
     }
 }
 

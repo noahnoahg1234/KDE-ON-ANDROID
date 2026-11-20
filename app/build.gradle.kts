@@ -28,8 +28,8 @@ android {
         // Android 9 target, like Termux: apps targeting 10+ may not execute programs they download,
         // which DroidSystem needs to run Debian's Linux programs (via proot). Install by sideloading.
         targetSdk = 28
-        versionCode = 18
-        versionName = "2.7.0"
+        versionCode = 19
+        versionName = "3.0.0"
         // proot is bundled for these CPUs (see app/src/main/jniLibs)
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
     }
@@ -63,6 +63,8 @@ android {
             project.findProperty("kdx.fpsSize")?.let { d -> it.systemProperty("kdx.fpsSize", d.toString()) }
             project.findProperty("kdx.fpsApp")?.let { d -> it.systemProperty("kdx.fpsApp", d.toString()) }
             project.findProperty("kdx.vncPort")?.let { d -> it.systemProperty("kdx.vncPort", d.toString()); it.outputs.upToDateWhen { false } }
+            project.findProperty("kdx.proot")?.let { d -> it.systemProperty("kdx.proot", d.toString()) }
+            project.findProperty("kdx.plasma")?.let { d -> it.systemProperty("kdx.plasma", d.toString()); it.outputs.upToDateWhen { false } }
             project.findProperty("kdx.tunRelay")?.let { d -> it.systemProperty("kdx.tunRelay", d.toString()); it.outputs.upToDateWhen { false } }
         }
     }

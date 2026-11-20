@@ -48,7 +48,7 @@ fun WindowLayer(state: KdxState) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val areaW = maxWidth.value
         val areaH = maxHeight.value
-        val visible = state.windows.filter { it.desktop == state.currentDesktop && !it.minimized }
+        val visible = state.windows.filter { it.desktop == state.currentDesktop && !it.minimized && !it.fullscreen }
         visible.forEachIndexed { index, w ->
             key(w.id) {
                 if (!w.placed) {

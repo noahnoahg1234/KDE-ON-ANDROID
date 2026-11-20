@@ -23,7 +23,7 @@ import java.io.File
 class DebianIntegrationTest {
     private val work = System.getProperty("kdx.integration")?.let { File(it) }
     private val sys by lazy {
-        DebianSystem(File(work, "rootfs"), ProotConfig("/usr/bin/proot"), File(work, "home"), "amd64",
+        DebianSystem(File(work, "rootfs"), ProotConfig(System.getProperty("kdx.proot") ?: "/usr/bin/proot"), File(work, "home"), "amd64",
             mirror = "https://deb.debian.org/debian", securityMirror = "https://deb.debian.org/debian-security").apply {
             // test machines that only reach the internet through an HTTPS proxy (phones connect directly)
             System.getenv("KDX_TEST_PROXY")?.let { p -> extraEnv = mapOf("https_proxy" to p, "http_proxy" to p, "no_proxy" to "localhost,127.0.0.1") }
@@ -496,5 +496,33 @@ class DebianIntegrationTest {
         val prog = File(sys.root, "root/bin/hello-prog").apply { parentFile?.mkdirs(); File(sys.root, "usr/bin/true").copyTo(this, overwrite = true); setExecutable(true, false) }
         assertEquals(0, sys.query("/root/bin/hello-prog").first)
         prog.delete()
+    }
+
+    /** Real KDE Plasma: installs it (if needed), starts a whole session and checks it draws a desktop. */
+    @Test fun p_plasma() {
+        assumeTrue(work != null && sys.isInstalled && System.getProperty("kdx.plasma") != null)
+        if (!org.kdx.shell.droid.KdePlasma.isInstalled(sys)) {
+            File(sys.root, "usr/local/bin/plasma-setup").apply { writeText(org.kdx.shell.droid.KdePlasma.setupScript()); setExecutable(true, false) }
+            assertEquals(0, sys.run("plasma-setup", ::log))
+        }
+        org.kdx.shell.droid.KdePlasma.writeDefaults(sys)
+        val d = LinuxDisplay(sys, 30, desktop = true)
+        try {
+            d.start(1280, 800)
+            d.launch(org.kdx.shell.droid.KdePlasma.COMMAND, org.kdx.shell.droid.KdePlasma.env)
+            val wait = (System.getProperty("kdx.plasma").toLongOrNull() ?: 60) * 1000
+            var t = 0L
+            while (t < wait) { Thread.sleep(10_000); t += 10_000; snapshot(d, "plasma-${t / 1000}s", 1500) }
+            val px = snapshot(d, "plasma", 2000)
+            println("distinct colours: ${px.distinct().size}")
+            val (_, ps) = sys.query("ps -eo pid,rss,comm | grep -Ei 'plasma|kwin|ksmserver|kded|dolphin' || true")
+            println(ps)
+            assertTrue("plasmashell runs", ps.contains("plasmashell"))
+            assertTrue("kwin runs", ps.contains("kwin"))
+            assertTrue("desktop is drawn", px.distinct().size > 200)
+        } finally {
+            d.log.forEach { println("  X| $it") }
+            d.stop()
+        }
     }
 }

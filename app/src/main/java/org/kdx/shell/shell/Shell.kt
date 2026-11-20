@@ -75,6 +75,32 @@ fun Shell(state: KdxState) {
         AnimatedVisibility(state.overviewOpen, enter = fadeIn(), exit = fadeOut()) {
             Overview(state)
         }
+        FullscreenLayer(state)
+    }
+}
+
+/**
+ * A full-screen window (the real KDE Plasma desktop) covers everything, KDX's panel included. A small handle in the
+ * corner goes back to KDX (the session keeps running; its button in KDX's task manager brings it back).
+ */
+@Composable
+private fun FullscreenLayer(state: KdxState) {
+    val w = state.windows.lastOrNull { it.fullscreen && !it.minimized && it.desktop == state.currentDesktop } ?: return
+    Box(Modifier.fillMaxSize().background(Color.Black).systemBarsPadding().imePadding()) {
+        org.kdx.shell.apps.AppContent(state, w)
+        var menu by remember { mutableStateOf(false) }
+        Box(Modifier.align(Alignment.TopEnd).padding(4.dp)) {
+            Box(
+                Modifier.size(30.dp).background(Color.Black.copy(alpha = 0.35f), androidx.compose.foundation.shape.CircleShape)
+                    .clickable { menu = true },
+                contentAlignment = Alignment.Center,
+            ) { Text("K", color = Color.White.copy(alpha = 0.85f)) }
+            DropdownMenu(menu, { menu = false }) {
+                DropdownMenuItem(text = { Text("Back to KDX") }, onClick = { menu = false; w.minimized = true })
+                DropdownMenuItem(text = { Text("Show in a window") }, onClick = { menu = false; w.fullscreen = false; w.maximized = true })
+                DropdownMenuItem(text = { Text("End ${w.title}") }, onClick = { menu = false; state.close(w) })
+            }
+        }
     }
 }
 

@@ -259,6 +259,8 @@ class DebianSystem(
             |  pulseaudio pulseaudio-utils libasound2-plugins
             |echo "Display server ready. Linux apps with windows now open in KDX's Linux Display."
             |""".trimMargin())
+        // Real KDE Plasma 6 (see KdePlasma)
+        tool("plasma-setup", KdePlasma.setupScript())
         // Sound: PulseAudio with a virtual speaker; KDX plays what it outputs (see LinuxAudio)
         tool("sound-setup", """#!/bin/sh
             |# Installs the sound server that carries Linux apps' audio to Android.
@@ -320,7 +322,7 @@ class DebianSystem(
 
     companion object {
         /** Bump when applyDroidLayer changes. 2: app-window Openbox config, xdotool/dbus in display-setup. */
-        const val LAYER_VERSION = 4 // 3: bwrap stand-in, 4: sound
+        const val LAYER_VERSION = 5 // 3: bwrap stand-in, 4: sound, 5: plasma-setup
 
         /** Extracts a tar stream into [dest] preserving symlinks, hard links (as copies) and permission bits. */
         fun extractTar(input: InputStream, dest: File) {

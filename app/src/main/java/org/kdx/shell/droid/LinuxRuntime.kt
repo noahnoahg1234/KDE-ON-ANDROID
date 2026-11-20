@@ -18,6 +18,8 @@ class LinuxDisplay(
     val display: Int = 1,
     /** App mode: one app per display, maximized without decorations (the KDX window supplies title bar and icon). */
     val appMode: Boolean = false,
+    /** Desktop mode: a whole desktop session (KDE Plasma) brings its own window manager, so no Openbox. */
+    val desktop: Boolean = false,
 ) {
     val port get() = 5900 + display
     @Volatile private var server: Process? = null
@@ -50,6 +52,8 @@ class LinuxDisplay(
         "LIBGL_ALWAYS_SOFTWARE" to "1", "GSK_RENDERER" to "cairo",
         // touch-friendly toolkits
         "GDK_SCALE" to "1", "QT_AUTO_SCREEN_SCALE_FACTOR" to "0",
+        // KDE's Qt integration (Breeze style, icons, KDE file dialogs) once KDE Plasma is installed; ignored otherwise
+        "QT_QPA_PLATFORMTHEME" to "kde",
         // Libraries that start their own bubblewrap sandbox fail under proot (no kernel namespaces on Android):
         // glycin = GNOME's image loader (every recent GNOME app that shows pictures), WebKitGTK web processes.
         "GLYCIN_DISABLE_SANDBOX" to "1",
@@ -111,7 +115,7 @@ class LinuxDisplay(
             if (System.currentTimeMillis() > deadline) throw IOException("Display server didn't start in time")
             Thread.sleep(150)
         }
-        if (sys.hasCommand("usr/bin/openbox")) {
+        if (!desktop && sys.hasCommand("usr/bin/openbox")) {
             val cfg = File(sys.root, APP_RC)
             wm = if (appMode && cfg.isFile) launchRaw("openbox --config-file /$APP_RC", emptyMap()) else launchRaw("openbox", emptyMap())
         }

@@ -50,6 +50,8 @@ enum class KApp(
     BAZAAR("Bazaar", "App Store", Icons.Filled.Storefront, "System", "store flatpak packages install apps software"),
     /** System-wide ad blocker (local DNS-only VPN). */
     ADBLOCK("Ad Blocker", "Block ads in all apps", Icons.Filled.Block, "System", "ads adblock blocker tracker privacy dns vpn"),
+    /** The real KDE Plasma 6 desktop from Debian, running in DroidSystem. */
+    PLASMA("KDE Plasma", "Real KDE Plasma desktop", Icons.Filled.Dashboard, "System", "kde plasma desktop real linux kwin dolphin konsole kate"),
     /** Privacy VPN: all traffic through Tor (or the user's proxy), fake GPS location. */
     PRIVACY("Privacy VPN", "Hide your IP and location", Icons.Filled.VpnLock, "System", "vpn tor privacy ip location proxy socks anonymous hide gps"),
     /** Shows the X display that DroidSystem's Linux apps (apt and Flatpak) draw on. */
@@ -57,7 +59,7 @@ enum class KApp(
     ;
 
     /** Apps that belong to DroidSystem rather than KDX itself. */
-    val droidOnly get() = this == BAZAAR || this == LINUXDISPLAY
+    val droidOnly get() = this == BAZAAR || this == LINUXDISPLAY || this == PLASMA
 
     val key get() = "kdx:$name"
 }
@@ -74,6 +76,8 @@ class KWindow(val id: Int, val app: KApp, arg: String?, desktop: Int, maximized:
     var minimized by mutableStateOf(false)
     var maximized by mutableStateOf(maximized)
     var keepAbove by mutableStateOf(false)
+    /** Covers the whole screen, KDX's panel included (KDE Plasma brings its own panel). */
+    var fullscreen by mutableStateOf(false)
     /** A window can show its own app's icon (e.g. a Linux app on the Linux Display) instead of the KDX app icon. */
     var iconFile by mutableStateOf<File?>(null)
     var placed = false
@@ -367,6 +371,45 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     fun launchLinuxGui(cmd: String, title: String? = null, icon: File? = null) =
         openAppWindow(title ?: cmd.substringBefore(' ').substringAfterLast('/'), icon) { d -> d.launch(cmd) }
 
+    /**
+     * Starts the real KDE Plasma desktop (installed with plasma-setup) full screen on its own display. A second call
+     * brings the running session back instead of starting another.
+     */
+    fun launchPlasma() {
+        val deb = debian ?: run { toast("Turn on the Linux system (DroidSystem 2) in System Settings first"); return }
+        windows.firstOrNull { it.fullscreen && it.app == KApp.LINUXDISPLAY }?.let { it.minimized = false; it.desktop = currentDesktop; focus(it); return }
+        if (!displaySetUp(deb)) return
+        if (!org.kdx.shell.droid.KdePlasma.isInstalled(deb)) {
+            toast("Installing KDE Plasma first (about 320 MB)…")
+            open(KApp.KONSOLE, "plasma-setup"); return
+        }
+        val n = (2..63).first { !appDisplays.containsKey(it) && !File(deb.root, "tmp/.X$it-lock").exists() }
+        val disp = org.kdx.shell.droid.LinuxDisplay(deb, n, desktop = true)
+        appDisplays[n] = disp
+        org.kdx.shell.droid.LinuxAppsService.update(ctx, appDisplays.size)
+        val dm = ctx.resources.displayMetrics
+        val wDp = dm.widthPixels / dm.density
+        val hDp = dm.heightPixels / dm.density
+        val f = xScale(wDp)
+        closeMenus()
+        val w = KWindow(nextId++, KApp.LINUXDISPLAY, "app:$n", currentDesktop, maximized = true)
+        w.title = "KDE Plasma"; w.fullscreen = true
+        windows.add(w); activeId = w.id
+        viewModelScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    ensureSound()
+                    org.kdx.shell.droid.KdePlasma.writeDefaults(deb)
+                    disp.start((wDp * f).toInt(), (hDp * f).toInt())
+                    disp.logFile = newLogFile("KDE Plasma")
+                    val start = { disp.launch(org.kdx.shell.droid.KdePlasma.COMMAND, org.kdx.shell.droid.KdePlasma.env) }
+                    disp.relaunch = { disp.logFile = newLogFile("KDE Plasma"); start() }
+                    disp.appProcess = start()
+                }
+            }.onFailure { e -> toast("Couldn't start KDE Plasma: ${e.message}"); close(w) }
+        }
+    }
+
     /** Runs an installed Flatpak app in its own window, with its name and icon. */
     fun launchFlatpak(id: String) {
         val runner = flatpakRunner ?: run { toast("Turn on the Linux system first"); return }
@@ -548,6 +591,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         closeMenus()
         // Single-instance apps are focused instead of duplicated.
         if (app.droidOnly && droid == null) { toast("Enable the Linux system (DroidSystem) in System Settings to use ${app.title}"); return }
+        if (app == KApp.PLASMA) { launchPlasma(); return }
         if (app in setOf(KApp.SETTINGS, KApp.KLIPPER, KApp.SYSMON, KApp.INFOCENTER, KApp.KNOTES, KApp.BAZAAR, KApp.LINUXDISPLAY, KApp.ADBLOCK, KApp.PRIVACY)) {
             windows.firstOrNull { it.app == app }?.let {
                 it.desktop = currentDesktop

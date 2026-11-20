@@ -142,6 +142,25 @@ DroidSystem also keeps its original, fully offline layer in that folder (mounted
 Packages and Flatpaks containing desktop-Linux binaries can be installed and inspected, but only script-based apps
 (like everything DroidSystem ships) actually run.
 
+## Real KDE Plasma
+KDX's own shell is an Android look-alike, but DroidSystem 2 can also run the **real KDE Plasma 6** from Debian:
+KWin, plasmashell with the real panel, Kickoff and system tray, plus Dolphin, Konsole, Kate, Okular, Gwenview, Ark,
+KCalc, Spectacle, System Monitor, Info Center and System Settings.
+
+- **Install:** open **KDE Plasma** in Kickoff. The first time, it runs `plasma-setup` in Konsole (about 320 MB to
+  download, 1.2 GB on disk).
+- **Run:** Plasma starts full screen on its own X display, with touch and the on-screen keyboard. The **K** button in
+  the corner goes back to KDX (Plasma keeps running), shows it in a window, or ends the session.
+- **Tuned for phones:** no systemd, no compositing, Qt Quick's software renderer (no GPU needed), tablet mode,
+  no screen locker, file indexer or splash screen. D-Bus services that can't work under proot (the splash screen,
+  and the desktop portal, which needs FUSE) are replaced with ones that fail at once, so Plasma doesn't wait on them.
+  These are defaults in their own config folder, so changes made in Plasma's System Settings win.
+- **KDE apps on their own:** KDE apps opened from KDX's Kickoff use KDE's Qt integration, so they get Breeze too.
+- **Needs:** a phone with 4 GB of RAM or more (a session uses about 800 MB).
+
+Test: `./gradlew testDebugUnitTest --tests '*DebianIntegrationTest.p_plasma' -Pkdx.integration=DIR -Pkdx.plasma=60`.
+On a Linux PC whose proot is too old for Qt 6, add `-Pkdx.proot=$PWD/tools/chroot-proot.sh` (needs root).
+
 ## Ad blocker
 **Ad Blocker** (in Kickoff) blocks ads and trackers in **every Android app** and in DroidSystem's Linux apps, without
 root. It works like Blokada/DNS66: a local VPN that only handles DNS. Android sends every app's DNS lookups to it, and
@@ -189,7 +208,7 @@ Requires JDK 17+ and the Android SDK (platform 35).
 ```
 
 ## Limits
-Android sandboxing rules out some things that real Plasma does. KDX cannot run Linux/Qt KDE binaries,
+Android sandboxing rules out some things that real Plasma does. KDX's own shell can't
 draw other Android apps inside its own windows (they open full-screen as usual), lock the screen,
 or read the clipboard while it is in the background. Konsole is a line-based shell, not a full VT100 terminal,
 so `vim`/`top`-style full-screen programs don't render.
