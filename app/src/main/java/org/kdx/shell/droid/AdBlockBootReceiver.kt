@@ -9,7 +9,9 @@ import android.net.VpnService
 class AdBlockBootReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
-        if (AdBlockService.prefs(ctx).getBoolean("enabled", false) && VpnService.prepare(ctx) == null) {
+        if (VpnService.prepare(ctx) != null) return
+        if (PrivacyVpnService.prefs(ctx).getBoolean("enabled", false)) { runCatching { PrivacyVpnService.start(ctx) }; return }
+        if (AdBlockService.prefs(ctx).getBoolean("enabled", false)) {
             runCatching { AdBlockService.start(ctx) }
         }
     }

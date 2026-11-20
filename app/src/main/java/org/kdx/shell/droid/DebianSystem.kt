@@ -68,10 +68,18 @@ class DebianSystem(
         allBinds += proot.binds
         if (rootfs == root) homeHost?.let { it.mkdirs(); allBinds += "/home/user" to it.path }
         allBinds += binds
+        // Privacy VPN on: Firefox is told to use its proxy (see LinuxPrivacy)
+        LinuxPrivacy.policies?.takeIf { LinuxPrivacy.active && it.isFile }?.let { pol ->
+            LinuxPrivacy.FIREFOX_DIRS.forEach { dir ->
+                val bound = allBinds.filter { (g, _) -> dir == g || dir.startsWith("$g/") }.maxByOrNull { it.first.length }
+                val host = if (bound != null) File(bound.second, dir.removePrefix(bound.first)) else File(rootfs, dir)
+                if (host.isDirectory) allBinds += "$dir/distribution/policies.json" to pol.path
+            }
+        }
         allBinds.forEach { (guest, host) -> args += listOf("-b", if (guest == host) host else "$host:$guest") }
         args += listOf("-w", cwd)
         args += listOf("/usr/bin/env", "-i")
-        (defaultEnv + extraEnv + env).forEach { (k, v) -> args += "$k=$v" }
+        (defaultEnv + extraEnv + LinuxPrivacy.env + env).forEach { (k, v) -> args += "$k=$v" }
         args += argv
         val pb = ProcessBuilder(args).redirectErrorStream(true)
         pb.environment().putAll(proot.env)

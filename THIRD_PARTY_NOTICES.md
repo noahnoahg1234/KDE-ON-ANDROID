@@ -21,3 +21,8 @@ The ad blocker bundles a domain list derived from [StevenBlack/hosts](https://gi
 app downloads the current version from the same project.
 
 Java libraries: Apache Commons Compress (Apache-2.0), XZ for Java (0BSD), AndroidX / Jetpack Compose (Apache-2.0).
+
+## Tor (tor-android 0.4.9.8)
+The Privacy VPN bundles Tor as built by the Guardian Project (`info.guardianproject:tor-android`, with `jtorctl`).
+Tor is © The Tor Project, Inc. and others, under the 3-clause BSD license; tor-android and jtorctl are under the
+3-clause BSD license as well. https://gitlab.torproject.org/tpo/core/tor · https://github.com/guardianproject/tor-android

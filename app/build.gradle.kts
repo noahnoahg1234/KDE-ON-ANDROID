@@ -28,8 +28,8 @@ android {
         // Android 9 target, like Termux: apps targeting 10+ may not execute programs they download,
         // which DroidSystem needs to run Debian's Linux programs (via proot). Install by sideloading.
         targetSdk = 28
-        versionCode = 17
-        versionName = "2.6.0"
+        versionCode = 18
+        versionName = "2.7.0"
         // proot is bundled for these CPUs (see app/src/main/jniLibs)
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
     }
@@ -63,6 +63,7 @@ android {
             project.findProperty("kdx.fpsSize")?.let { d -> it.systemProperty("kdx.fpsSize", d.toString()) }
             project.findProperty("kdx.fpsApp")?.let { d -> it.systemProperty("kdx.fpsApp", d.toString()) }
             project.findProperty("kdx.vncPort")?.let { d -> it.systemProperty("kdx.vncPort", d.toString()); it.outputs.upToDateWhen { false } }
+            project.findProperty("kdx.tunRelay")?.let { d -> it.systemProperty("kdx.tunRelay", d.toString()); it.outputs.upToDateWhen { false } }
         }
     }
     packaging {
@@ -100,9 +101,17 @@ dependencies {
     // Archive formats for DroidSystem (.deb = ar + tar.{gz,xz,bz2})
     implementation("org.apache.commons:commons-compress:1.27.1")
     implementation("org.tukaani:xz:1.10")
+    // Tor (The Tor Project / Guardian Project build) for the Privacy VPN. Pure Java; its newer Kotlin stdlib isn't needed.
+    // 0.4.9.8 is the newest release whose classes (Java 21) AGP 8.7's D8 can read; later ones are Java 24 bytecode.
+    implementation("info.guardianproject:tor-android:0.4.9.8") { exclude(group = "org.jetbrains.kotlin") }
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303") // real org.json for plain JVM tests
     testImplementation("org.robolectric:robolectric:4.14.1")
     testImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
+
+// tor-android's AAR metadata asks for compileSdk 37 only because that's what it was built with; its code (a plain
+// Service) needs nothing newer than API 24, and AGP 8.7 can't compile against 37.
+tasks.matching { it.name.startsWith("check") && it.name.endsWith("AarMetadata") }.configureEach { enabled = false }

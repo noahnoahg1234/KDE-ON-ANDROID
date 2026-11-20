@@ -87,14 +87,8 @@ class AdBlockService : VpnService() {
                 }
             }.getOrNull()
         }
-        val learner = learner(this)
-        val engine = DnsEngine(current ?: loadList(this), forward, { name -> blocked.incrementAndGet(); remember(name) }) { name, onList ->
-            when {
-                isPaused() -> false
-                smartEnabled(this) -> learner.check(name, onList)
-                else -> onList
-            }
-        }
+        learner(this)
+        val engine = DnsEngine(current ?: loadList(this), forward, { name -> noteBlocked(name) }) { name, onList -> decide(this, name, onList) }
         while (running) {
             val n = runCatching { input.read(buf) }.getOrDefault(-1)
             if (n < 0) break
@@ -142,6 +136,18 @@ class AdBlockService : VpnService() {
         /** The most recently blocked names, newest first. */
         fun recentlyBlocked(): List<String> = synchronized(recent) { recent.toList().reversed() }
 
+        /** Final blocking decision for a lookup: pause, then smart learning, then the list. */
+        fun decide(ctx: Context, name: String, onList: Boolean): Boolean = when {
+            isPaused() -> false
+            smartEnabled(ctx) -> learner(ctx).check(name, onList)
+            else -> onList
+        }
+
+        fun noteBlocked(name: String) { blocked.incrementAndGet(); remember(name) }
+
+        /** Blocking right now – by this service, or by the privacy VPN (which does the ad blocker's job while it runs). */
+        fun isActive(ctx: Context) = isRunning || (PrivacyVpnService.isRunning && prefs(ctx).getBoolean("enabled", false))
+
         private fun remember(name: String) = synchronized(recent) {
             recent.remove(name); recent.addLast(name); while (recent.size > 100) recent.removeFirst()
         }
@@ -184,7 +190,7 @@ class AdBlockService : VpnService() {
         fun excludedApps(ctx: Context): Set<String> = prefs(ctx).getStringSet("excluded", emptySet()) ?: emptySet()
         fun setExcluded(ctx: Context, pkgs: Set<String>) {
             prefs(ctx).edit().putStringSet("excluded", pkgs.toSet()).apply()
-            if (isRunning) { stop(ctx); android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ start(ctx) }, 800) }
+            if (isRunning && !PrivacyVpnService.isRunning) { stop(ctx); android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ start(ctx) }, 800) }
         }
         fun upstreamDns(ctx: Context): String = prefs(ctx).getString("upstream", "1.1.1.1") ?: "1.1.1.1"
         fun allowList(ctx: Context): Set<String> = prefs(ctx).getStringSet("allow", emptySet()) ?: emptySet()
@@ -225,11 +231,16 @@ class AdBlockService : VpnService() {
         fun selfTest(): String? = runCatching { java.net.InetAddress.getByName("doubleclick.net").hostAddress }.getOrNull()
 
         /** Reloads the list into a running blocker (after an update or allow-list change). */
-        fun reload(ctx: Context) { learnerRef = null; if (isRunning) current = loadList(ctx) }
+        fun reload(ctx: Context) { learnerRef = null; if (isRunning || PrivacyVpnService.isRunning) current = loadList(ctx) }
 
-        fun start(ctx: Context) = ctx.startForegroundService(Intent(ctx, AdBlockService::class.java))
+        fun start(ctx: Context) {
+            // Android runs one VPN at a time; while the privacy VPN runs it blocks ads itself
+            if (PrivacyVpnService.isRunning) { reload(ctx); return }
+            ctx.startForegroundService(Intent(ctx, AdBlockService::class.java))
+        }
 
         fun stop(ctx: Context) {
+            if (PrivacyVpnService.isRunning && !isRunning) return
             runCatching { ctx.startService(Intent(ctx, AdBlockService::class.java).setAction(ACTION_STOP)) }
         }
 

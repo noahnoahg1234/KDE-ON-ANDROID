@@ -48,7 +48,7 @@ fun AdBlocker(state: KdxState) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val prefs = remember { AdBlockService.prefs(ctx) }
-    var running by remember { mutableStateOf(AdBlockService.isRunning) }
+    var running by remember { mutableStateOf(AdBlockService.isActive(ctx)) }
     var queries by remember { mutableLongStateOf(0) }
     var blocked by remember { mutableLongStateOf(0) }
     var recent by remember { mutableStateOf(emptyList<String>()) }
@@ -66,7 +66,7 @@ fun AdBlocker(state: KdxState) {
     fun turnOn() {
         prefs.edit().putBoolean("enabled", true).apply()
         AdBlockService.start(ctx)
-        scope.launch { delay(800); running = AdBlockService.isRunning; state.syncLinuxDns() }
+        scope.launch { delay(800); running = AdBlockService.isActive(ctx); state.syncLinuxDns() }
     }
     val consent = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         if (r.resultCode == Activity.RESULT_OK) turnOn() else state.toast("The ad blocker needs Android's VPN permission")
@@ -78,7 +78,7 @@ fun AdBlocker(state: KdxState) {
         } else {
             prefs.edit().putBoolean("enabled", false).apply()
             AdBlockService.stop(ctx)
-            scope.launch { delay(500); running = AdBlockService.isRunning; state.syncLinuxDns() }
+            scope.launch { delay(500); running = AdBlockService.isActive(ctx); state.syncLinuxDns() }
         }
     }
     fun saveAllow(set: Set<String>) {
@@ -91,7 +91,7 @@ fun AdBlocker(state: KdxState) {
     val privateDns = remember { runCatching { Settings.Global.getString(ctx.contentResolver, "private_dns_mode") }.getOrNull() }
     LaunchedEffect(Unit) {
         while (true) {
-            running = AdBlockService.isRunning
+            running = AdBlockService.isActive(ctx)
             queries = AdBlockService.queries.get(); blocked = AdBlockService.blocked.get()
             recent = AdBlockService.recentlyBlocked().take(30)
             learned = withContext(Dispatchers.IO) { AdBlockService.learned(ctx) }
@@ -119,6 +119,9 @@ fun AdBlocker(state: KdxState) {
             }
             Switch(running, { setOn(it) })
         }
+        if (org.kdx.shell.droid.PrivacyVpnService.isRunning) Text(
+            "The Privacy VPN is on, so it blocks ads too (Android runs one VPN at a time). Settings here still apply.",
+            color = c.inactiveText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
         if (privateDns == "hostname") Row(
             Modifier.fillMaxWidth().padding(top = 10.dp).clip(RoundedCornerShape(8.dp)).background(c.neutral.copy(alpha = 0.15f)).padding(10.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -297,7 +300,7 @@ fun AdBlocker(state: KdxState) {
 
 /** Lists installed apps (with a launcher icon) to pick one. */
 @Composable
-private fun AppPicker(skip: Set<String>, onDismiss: () -> Unit, onPick: (String) -> Unit) {
+internal fun AppPicker(skip: Set<String>, onDismiss: () -> Unit, onPick: (String) -> Unit) {
     val c = LocalBreeze.current
     val ctx = LocalContext.current
     var apps by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
@@ -331,7 +334,7 @@ private fun AppPicker(skip: Set<String>, onDismiss: () -> Unit, onPick: (String)
 }
 
 @Composable
-private fun Stat(modifier: Modifier, value: String, label: String) {
+internal fun Stat(modifier: Modifier, value: String, label: String) {
     val c = LocalBreeze.current
     Column(modifier.clip(RoundedCornerShape(10.dp)).background(c.view).border(1.dp, c.border.copy(alpha = 0.5f), RoundedCornerShape(10.dp)).padding(10.dp)) {
         Text(value, color = c.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
@@ -340,7 +343,7 @@ private fun Stat(modifier: Modifier, value: String, label: String) {
 }
 
 @Composable
-private fun Section2(title: String, content: @Composable ColumnScope.() -> Unit) {
+internal fun Section2(title: String, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalBreeze.current
     Spacer(Modifier.height(14.dp))
     Text(title, color = c.text, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)

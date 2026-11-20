@@ -50,6 +50,7 @@ fun AppContent(state: KdxState, w: KWindow) {
         KApp.BAZAAR -> Bazaar(state, w)
         KApp.LINUXDISPLAY -> LinuxDisplayApp(state, w)
         KApp.ADBLOCK -> AdBlocker(state)
+        KApp.PRIVACY -> PrivacyVpnApp(state)
     }
 }
 

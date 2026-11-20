@@ -160,6 +160,21 @@ never are. Learned servers are listed with an "Allow" button. To get an app's re
 **Pause 5 min** (blocking resumes by itself) or add the app to **Apps where ads aren't blocked**, which takes it out
 of the VPN entirely.
 
+## Privacy VPN
+**Privacy VPN** (in Kickoff) hides your IP address, traffic and location from apps, websites and the network you're
+on. Every app's traffic goes through **Tor** (free, no account, built in) or through **your own SOCKS5 proxy**:
+- A small TCP/IP stack in KDX (`TunStack`) takes the VPN's packets and carries each TCP connection through the proxy.
+  DNS goes through Tor too; IPv6 and non-DNS UDP are dropped so nothing leaks around it (apps fall back to TCP/IPv4).
+- You can pick the country you appear to be in, get a **New identity**, and **Check my IP**.
+- The Ad Blocker keeps working while it's on (Android runs one VPN at a time, so the Privacy VPN does its job).
+- DroidSystem's Linux apps are pointed at the proxy (proxy variables for apt, curl, GTK and Chromium apps, and a
+  Firefox policy), and get no direct DNS.
+- **Fake location** shows apps a chosen city instead of your GPS. Choose KDX under Developer options → Select mock
+  location app first. The page also lists apps that can see your real location, with a shortcut to their permissions.
+- **Apps that skip the VPN** is for apps that refuse VPNs.
+
+Tor is slower than a paid VPN and some sites block it. Signing in to a site still tells it who you are.
+
 ## Install
 Download `app-release.apk` from the latest **Build KDX** run in GitHub Actions (artifact `KDX-apk`) and install it.
 To use KDX as your home screen: *Kickoff → Leave → Default Home App*, then choose **KDX**.

@@ -18,6 +18,9 @@
     <!-- ad blocker restarts after a reboot if it was on -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Fake GPS location (only works once KDX is chosen as Developer options → Select mock location app) -->
+    <uses-permission android:name="android.permission.ACCESS_MOCK_LOCATION"
+        tools:ignore="MockLocation,ProtectedPermissions" />
 
     <queries>
         <intent>
@@ -73,6 +76,22 @@
                 <action android:name="android.net.VpnService" />
             </intent-filter>
         </service>
+        <!-- Privacy VPN: all traffic through Tor; Tor runs in its own process -->
+        <service
+            android:name=".droid.PrivacyVpnService"
+            android:exported="false"
+            android:permission="android.permission.BIND_VPN_SERVICE">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
+        <service
+            android:name="org.torproject.jni.TorService"
+            android:exported="false"
+            android:process=":tor" />
+        <service
+            android:name=".droid.FakeLocationService"
+            android:exported="false" />
         <receiver
             android:name=".droid.AdBlockBootReceiver"
             android:exported="false">

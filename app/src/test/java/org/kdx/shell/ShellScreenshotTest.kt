@@ -202,6 +202,15 @@ class ShellScreenshotTest {
         assertTrue("bundled blocklist in the app (${list.size})", list.size > 50_000)
     }
 
+    @Test fun privacyVpnPage() {
+        rule.runOnUiThread { state.open(KApp.PRIVACY) }
+        rule.mainClock.advanceTimeBy(2000); Thread.sleep(500); rule.mainClock.advanceTimeBy(500)
+        shot("71-privacy-vpn")
+        rule.onNodeWithText("Not protected").assertExists()
+        rule.onNodeWithText("Tor (free, no account)").assertExists()
+        rule.onNodeWithText("Fake location (GPS)").assertExists()
+    }
+
     @Test fun konsoleRunsCommands() {
         rule.runOnUiThread { state.open(KApp.KONSOLE, "help") }
         shot("30-konsole-help")
