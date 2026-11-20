@@ -134,6 +134,7 @@ fun KAppIcon(app: KApp, size: Dp) {
         KApp.SETTINGS -> Color(0xFF6C7A89)
         KApp.BAZAAR -> Color(0xFF8E44AD)
         KApp.LINUXDISPLAY -> Color(0xFFE95420)
+        KApp.ADBLOCK -> Color(0xFFDA4453)
     }
     Box(
         Modifier.size(size).clip(RoundedCornerShape(size / 4)).background(tint),

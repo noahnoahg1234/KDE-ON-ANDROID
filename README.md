@@ -142,6 +142,16 @@ DroidSystem also keeps its original, fully offline layer in that folder (mounted
 Packages and Flatpaks containing desktop-Linux binaries can be installed and inspected, but only script-based apps
 (like everything DroidSystem ships) actually run.
 
+## Ad blocker
+**Ad Blocker** (in Kickoff) blocks ads and trackers in **every Android app** and in DroidSystem's Linux apps, without
+root. It works like Blokada/DNS66: a local VPN that only handles DNS. Android sends every app's DNS lookups to it, and
+lookups for the ~76,000 ad/tracker domains on StevenBlack's list get "no such domain". Everything else goes to a
+normal DNS server you pick (Cloudflare, Quad9, Google or AdGuard), and all other traffic bypasses the VPN entirely.
+It shows live counts and recently blocked domains (tap "Allow" if something breaks), updates its list in-app, and
+turns itself back on after a reboot. Limits: ads served from the same servers as the content (e.g. YouTube) can't be
+told apart by DNS, Android's "Private DNS" set to a specific server bypasses it, and it can't run alongside another
+VPN app.
+
 ## Install
 Download `app-release.apk` from the latest **Build KDX** run in GitHub Actions (artifact `KDX-apk`) and install it.
 To use KDX as your home screen: *Kickoff → Leave → Default Home App*, then choose **KDX**.

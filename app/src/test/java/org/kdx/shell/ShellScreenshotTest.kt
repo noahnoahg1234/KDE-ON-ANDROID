@@ -192,6 +192,16 @@ class ShellScreenshotTest {
         rule.onAllNodes(androidx.compose.ui.test.hasText("Untitled — Paint")).onFirst().assertExists()
     }
 
+    @Test fun adBlockerPage() {
+        rule.runOnUiThread { state.open(KApp.ADBLOCK) }
+        rule.mainClock.advanceTimeBy(2000); Thread.sleep(500); rule.mainClock.advanceTimeBy(500)
+        shot("70-adblocker")
+        rule.onNodeWithText("Ad blocker is off").assertExists()
+        // the bundled list is packaged and loads
+        val list = org.kdx.shell.droid.AdBlockService.loadList(rule.activity)
+        assertTrue("bundled blocklist in the app (${list.size})", list.size > 50_000)
+    }
+
     @Test fun konsoleRunsCommands() {
         rule.runOnUiThread { state.open(KApp.KONSOLE, "help") }
         shot("30-konsole-help")

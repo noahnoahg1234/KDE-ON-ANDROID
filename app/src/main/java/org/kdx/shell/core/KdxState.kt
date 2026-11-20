@@ -48,6 +48,8 @@ enum class KApp(
     SETTINGS("System Settings", "Configure KDX", Icons.Filled.Settings, "Settings", "preferences theme wallpaper appearance desktops"),
     /** DroidSystem's app store; listed through its .desktop entry, so only visible once DroidSystem is installed. */
     BAZAAR("Bazaar", "App Store", Icons.Filled.Storefront, "System", "store flatpak packages install apps software"),
+    /** System-wide ad blocker (local DNS-only VPN). */
+    ADBLOCK("Ad Blocker", "Block ads in all apps", Icons.Filled.Block, "System", "ads adblock blocker tracker privacy dns vpn"),
     /** Shows the X display that DroidSystem's Linux apps (apt and Flatpak) draw on. */
     LINUXDISPLAY("Linux Display", "Linux Desktop Apps", Icons.Filled.DesktopWindows, "System", "x11 vnc linux gui display flatpak"),
     ;
@@ -202,8 +204,22 @@ class KdxState(app: Application) : AndroidViewModel(app) {
 
     private var orphansCleaned = false
 
+    /** Points DroidSystem's Linux apps at the ad blocker's DNS while it runs (they don't use Android's resolver). */
+    fun syncLinuxDns() {
+        val d = debian ?: return
+        val dns = if (org.kdx.shell.droid.AdBlockService.isRunning) org.kdx.shell.droid.AdBlockService.DNS4 else "1.1.1.1\nnameserver 8.8.8.8"
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val f = File(d.root, "etc/resolv.conf")
+                java.nio.file.Files.deleteIfExists(f.toPath())
+                f.writeText("nameserver $dns\n")
+            }
+        }
+    }
+
     private fun attachDebian(d: org.kdx.shell.droid.DebianSystem?) {
         debian = d
+        if (d != null) syncLinuxDns()
         if (d != null && !orphansCleaned) {
             orphansCleaned = true
             // Linux programs left running by an earlier KDX session (their windows are gone). On Android every
@@ -525,7 +541,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         closeMenus()
         // Single-instance apps are focused instead of duplicated.
         if (app.droidOnly && droid == null) { toast("Enable the Linux system (DroidSystem) in System Settings to use ${app.title}"); return }
-        if (app in setOf(KApp.SETTINGS, KApp.KLIPPER, KApp.SYSMON, KApp.INFOCENTER, KApp.KNOTES, KApp.BAZAAR, KApp.LINUXDISPLAY)) {
+        if (app in setOf(KApp.SETTINGS, KApp.KLIPPER, KApp.SYSMON, KApp.INFOCENTER, KApp.KNOTES, KApp.BAZAAR, KApp.LINUXDISPLAY, KApp.ADBLOCK)) {
             windows.firstOrNull { it.app == app }?.let {
                 it.desktop = currentDesktop
                 focus(it)

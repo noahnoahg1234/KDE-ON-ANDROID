@@ -16,4 +16,8 @@ removed from all three; `libtalloc.so`'s soname was set to `libtalloc.so`. Andro
 DroidSystem 2 downloads Debian packages from `deb.debian.org` on the user's device when the Linux system is turned
 on; each package keeps its own license under `/usr/share/doc` inside DroidSystem.
 
+The ad blocker bundles a domain list derived from [StevenBlack/hosts](https://github.com/StevenBlack/hosts)
+(unified hosts: adware + malware, MIT License; `app/src/main/assets/adblock/blocklist.bin`, gzip). "Update list" in the
+app downloads the current version from the same project.
+
 Java libraries: Apache Commons Compress (Apache-2.0), XZ for Java (0BSD), AndroidX / Jetpack Compose (Apache-2.0).
