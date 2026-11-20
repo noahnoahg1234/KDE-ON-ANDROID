@@ -63,6 +63,12 @@ Linux software:
   **Kitties** (`io.github.Micro856.KittiesGtk`, GNOME 51 runtime): it starts, fetches and shows pictures.
   Firefox's own sandboxes (seccomp/namespaces) are turned off with Mozilla's `MOZ_DISABLE_*_SANDBOX` variables, as
   Termux users do; **Firefox** (`org.mozilla.firefox`) starts and renders pages this way.
+- **Sound**: PulseAudio runs inside DroidSystem with a virtual speaker; apps (Debian and Flatpak) send audio over
+  TCP, and KDX plays the speaker's output through Android. Set up with `sound-setup` (included in `display-setup`),
+  toggle in System Settings → Linux System.
+- **Up to 60 fps**: the X server is capped at 60 fps and pushes frames as they change (RFB Continuous Updates +
+  Fence); pixels arrive in Android's own byte order and go to a double-buffered Bitmap with one native copy. KDX's
+  client sustains 60+ fps at 1280×800; the real rate depends on how fast the app itself draws (software rendering).
 - If a Linux app stops right after starting or with an error, its window stays open and explains why (e.g. Android
   ended it for memory, a blocked system call, a crash) with the app's log, **Restart** and **Copy log**. Not supported:
   "extra-data" apps that download proprietary files at install time (they need bubblewrap), and apps that require a

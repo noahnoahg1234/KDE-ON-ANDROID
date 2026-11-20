@@ -41,6 +41,9 @@ class DebianSystem(
     val flatpakHome get() = File(root, "root/.local/share/flatpak")
     fun hasCommand(path: String) = Files.exists(Paths.get(root.path, path), LinkOption.NOFOLLOW_LINKS)
 
+    /** Extra variables for every command (used by tests on machines that need a proxy; empty on phones). */
+    @Volatile var extraEnv: Map<String, String> = emptyMap()
+
     // ------------------------------------------------------------------ running commands
     val defaultEnv = mapOf(
         "HOME" to "/root", "USER" to "root", "LOGNAME" to "root", "HOSTNAME" to "droidsystem",
@@ -68,7 +71,7 @@ class DebianSystem(
         allBinds.forEach { (guest, host) -> args += listOf("-b", if (guest == host) host else "$host:$guest") }
         args += listOf("-w", cwd)
         args += listOf("/usr/bin/env", "-i")
-        (defaultEnv + env).forEach { (k, v) -> args += "$k=$v" }
+        (defaultEnv + extraEnv + env).forEach { (k, v) -> args += "$k=$v" }
         args += argv
         val pb = ProcessBuilder(args).redirectErrorStream(true)
         pb.environment().putAll(proot.env)
@@ -244,9 +247,21 @@ class DebianSystem(
             |# Installs the X display server used by KDX's Linux Display window.
             |set -e
             |apt-get update
-            |apt-get install -y tigervnc-standalone-server openbox dbus dbus-x11 x11-xserver-utils x11-utils xdotool fonts-dejavu-core adwaita-icon-theme
+            |apt-get install -y tigervnc-standalone-server openbox dbus dbus-x11 x11-xserver-utils x11-utils xdotool fonts-dejavu-core adwaita-icon-theme \\
+            |  pulseaudio pulseaudio-utils libasound2-plugins
             |echo "Display server ready. Linux apps with windows now open in KDX's Linux Display."
             |""".trimMargin())
+        // Sound: PulseAudio with a virtual speaker; KDX plays what it outputs (see LinuxAudio)
+        tool("sound-setup", """#!/bin/sh
+            |# Installs the sound server that carries Linux apps' audio to Android.
+            |set -e
+            |apt-get update
+            |apt-get install -y pulseaudio pulseaudio-utils libasound2-plugins
+            |echo "Sound ready. Linux apps play through your phone's speaker."
+            |""".trimMargin())
+        File(root, LinuxAudio.CONFIG).apply { parentFile?.mkdirs() }.writeText(LinuxAudio.PA_CONFIG)
+        // ALSA-only programs go through PulseAudio too
+        File(root, "etc/asound.conf").writeText("pcm.!default { type pulse }\nctl.!default { type pulse }\n")
         // same bwrap stand-in for Debian's own apps (see FlatpakRunner.NO_BWRAP)
         tool("bwrap", FlatpakRunner.NO_BWRAP)
         tool("droidsystem-version", "#!/bin/sh\n. /etc/os-release\necho \"\$PRETTY_NAME\"\n")
@@ -297,7 +312,7 @@ class DebianSystem(
 
     companion object {
         /** Bump when applyDroidLayer changes. 2: app-window Openbox config, xdotool/dbus in display-setup. */
-        const val LAYER_VERSION = 3 // 3: bwrap stand-in
+        const val LAYER_VERSION = 4 // 3: bwrap stand-in, 4: sound
 
         /** Extracts a tar stream into [dest] preserving symlinks, hard links (as copies) and permission bits. */
         fun extractTar(input: InputStream, dest: File) {

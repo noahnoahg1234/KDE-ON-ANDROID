@@ -79,15 +79,30 @@ class DisplaySession : Closeable {
             }
             if (!ok) return@launch
             rfb = client
-            bitmap = Bitmap.createBitmap(client.width, client.height, Bitmap.Config.ARGB_8888)
+            // Double buffering: the screen shows `front` while the reader thread copies the next frame into the
+            // other bitmap (one native memcpy of the RGBA framebuffer), then they swap – no tearing, no per-pixel work.
+            val pair = java.util.concurrent.atomic.AtomicReference(
+                Bitmap.createBitmap(client.width, client.height, Bitmap.Config.ARGB_8888) to
+                    Bitmap.createBitmap(client.width, client.height, Bitmap.Config.ARGB_8888))
+            val front = java.util.concurrent.atomic.AtomicReference(pair.get().first)
+            val pending = java.util.concurrent.atomic.AtomicBoolean(false)
+            bitmap = front.get()
             connected = true; status = ""
-            var pending = false
-            client.onResize = { w, h -> scope.launch { bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888) } }
+            client.onResize = { w, h ->
+                val a = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                pair.set(a to Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)); front.set(a)
+                scope.launch { bitmap = a }
+            }
             client.onFrame = {
-                // copy on the reader thread, then let Compose redraw (coalesced)
-                bitmap?.takeIf { it.width == client.width && it.height == client.height }
-                    ?.setPixels(client.pixels, 0, client.width, 0, 0, client.width, client.height)
-                if (!pending) { pending = true; scope.launch { pending = false; frame++ } }
+                val (a, b) = pair.get()
+                val back = if (front.get() === a) b else a
+                val buf = client.buffer
+                if (back.width == client.width && back.height == client.height && buf.size == back.width * back.height * 4) {
+                    back.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(buf))
+                    if (pending.compareAndSet(false, true)) {
+                        scope.launch { front.set(back); bitmap = back; pending.set(false); frame++ }
+                    }
+                }
             }
             withContext(Dispatchers.IO) { runCatching { client.loop() } }
             connected = false; status = "Display closed"

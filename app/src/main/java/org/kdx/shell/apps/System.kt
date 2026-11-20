@@ -389,6 +389,7 @@ private fun LinuxSystemSection(state: KdxState) {
             }
             DebianBlock(state)
             Toggle("Flatpak support", state.flatpakEnabled) { state.flatpakEnabled = it; state.save(); state.refreshLinuxApps() }
+            Toggle("Sound from Linux apps", state.linuxSound) { state.setSound(it) }
             Toggle("Open Linux file types in Dolphin (.deb .dsp .desktop .sh .flatpakref .tar.*)", state.linuxFileTypes) {
                 state.linuxFileTypes = it; state.save()
             }

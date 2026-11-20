@@ -122,6 +122,8 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     var linuxFileTypes by mutableStateOf(prefs.getBoolean("linuxTypes", true))
     /** Bazaar shows the online Flathub catalog. */
     var flathubEnabled by mutableStateOf(prefs.getBoolean("flathub", true))
+    /** Play Linux apps' sound through the phone. */
+    var linuxSound by mutableStateOf(prefs.getBoolean("linuxSound", true))
     val flathub by lazy { org.kdx.shell.droid.Flathub(app) }
     var droidProgress by mutableStateOf<Pair<Float, String>?>(null)
     var linuxApps by mutableStateOf<List<DroidSystem.DesktopEntry>>(emptyList())
@@ -168,6 +170,27 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         private set
     var flatpakRunner: org.kdx.shell.droid.FlatpakRunner? = null
         private set
+    var linuxAudio: org.kdx.shell.droid.LinuxAudio? = null
+        private set
+    private val androidAudio = org.kdx.shell.droid.AndroidAudio()
+    private var soundHintShown = false
+
+    /** Starts DroidSystem's sound server and plays it on the phone (no-op if sound is off or not installed). */
+    fun ensureSound() {
+        val audio = linuxAudio ?: return
+        if (!linuxSound) { androidAudio.stop(); return }
+        if (!audio.isSetUp) {
+            if (!soundHintShown) { soundHintShown = true; viewModelScope.launch { toast("For sound in Linux apps, run sound-setup in Konsole once") } }
+            return
+        }
+        runCatching { audio.start() }
+        androidAudio.start()
+    }
+
+    fun setSound(on: Boolean) {
+        linuxSound = on; save()
+        if (on) viewModelScope.launch(Dispatchers.IO) { ensureSound() } else { androidAudio.stop(); linuxAudio?.stop() }
+    }
     /** Bumped when Debian packages / Flatpaks change, so Bazaar and Kickoff re-check. */
     var debianVersion by mutableIntStateOf(0)
 
@@ -181,8 +204,12 @@ class KdxState(app: Application) : AndroidViewModel(app) {
                 linuxDisplay?.stop()
                 linuxDisplay = org.kdx.shell.droid.LinuxDisplay(d)
                 flatpakRunner = org.kdx.shell.droid.FlatpakRunner(d, linuxDisplay!!)
+                linuxAudio?.stop(); linuxAudio = org.kdx.shell.droid.LinuxAudio(d)
             }
-        } else { linuxDisplay?.stop(); linuxDisplay = null; flatpakRunner = null }
+        } else {
+            linuxDisplay?.stop(); linuxDisplay = null; flatpakRunner = null
+            androidAudio.stop(); linuxAudio?.stop(); linuxAudio = null
+        }
     }
 
     /** Enabling DroidSystem also builds the Debian base (tests switch this off to stay offline). */
@@ -261,6 +288,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
+                    ensureSound() // before the app starts, so it finds the sound server
                     disp.start((wDp * f).toInt(), (hDp * f).toInt())
                     disp.logFile = newLogFile(title)
                     disp.relaunch = { disp.logFile = newLogFile(title); start(disp) }
@@ -398,6 +426,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         .putBoolean("flatpak", flatpakEnabled)
         .putBoolean("linuxTypes", linuxFileTypes)
         .putBoolean("flathub", flathubEnabled)
+        .putBoolean("linuxSound", linuxSound)
         .putInt("theme", themeMode.ordinal)
         .putInt("accent", accentIndex)
         .putInt("wallpaper", wallpaperIndex)
@@ -623,6 +652,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         windows.forEach { it.dispose() }
         appDisplays.values.forEach { runCatching { it.stop() } }
+        androidAudio.stop(); linuxAudio?.stop()
         linuxDisplay?.stop()
     }
 }

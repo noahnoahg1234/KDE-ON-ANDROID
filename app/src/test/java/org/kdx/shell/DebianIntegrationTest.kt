@@ -12,6 +12,7 @@ import org.kdx.shell.droid.ProotConfig
 import org.kdx.shell.droid.LinuxDisplay
 import org.kdx.shell.droid.FlatpakRunner
 import org.kdx.shell.droid.RfbClient
+import org.kdx.shell.droid.LinuxAudio
 import java.io.File
 
 /**
@@ -23,7 +24,10 @@ class DebianIntegrationTest {
     private val work = System.getProperty("kdx.integration")?.let { File(it) }
     private val sys by lazy {
         DebianSystem(File(work, "rootfs"), ProotConfig("/usr/bin/proot"), File(work, "home"), "amd64",
-            mirror = "http://deb.debian.org/debian", securityMirror = "http://deb.debian.org/debian-security")
+            mirror = "https://deb.debian.org/debian", securityMirror = "https://deb.debian.org/debian-security").apply {
+            // test machines that only reach the internet through an HTTPS proxy (phones connect directly)
+            System.getenv("KDX_TEST_PROXY")?.let { p -> extraEnv = mapOf("https_proxy" to p, "http_proxy" to p, "no_proxy" to "localhost,127.0.0.1") }
+        }
     }
     private fun log(s: String) = println("  | $s")
 
@@ -31,8 +35,17 @@ class DebianIntegrationTest {
         assumeTrue(work != null)
         if (sys.isInstalled) return
         var last = ""
-        sys.bootstrap(DebianRepo(mirror = "http://deb.debian.org/debian", arch = "amd64"), File(work, "cache"), { p, m -> if (m != last) { println("[%3.0f%%] %s".format(p * 100, m)); last = m } }, ::log)
+        sys.bootstrap(DebianRepo(mirror = "https://deb.debian.org/debian", arch = "amd64"), File(work, "cache"), { p, m -> if (m != last) { println("[%3.0f%%] %s".format(p * 100, m)); last = m } }, ::log)
         assertTrue(sys.isInstalled)
+        trustTestProxy()
+    }
+
+    /** Machines behind a TLS-inspecting proxy: trust its CA inside the guest (phones don't need this). */
+    private fun trustTestProxy() {
+        val ca = System.getenv("KDX_EXTRA_CA") ?: return
+        File(sys.root, "usr/local/share/ca-certificates").mkdirs()
+        File(ca).copyTo(File(sys.root, "usr/local/share/ca-certificates/test-proxy.crt"), overwrite = true)
+        sys.run("update-ca-certificates", ::log)
     }
 
     @Test fun b_basics() {
@@ -306,5 +319,75 @@ class DebianIntegrationTest {
         println(out)
         assertEquals(out, 0, rc)
         assertTrue(out.contains("linked-runtime-ok"))
+    }
+
+    /** Frame rate of the display pipeline with a constantly animating app (glxgears, software GL). */
+    @Test fun k_frameRate() {
+        assumeTrue(work != null && sys.isInstalled && sys.hasCommand("usr/bin/Xvnc"))
+        if (!sys.hasCommand("usr/bin/glxgears")) assertEquals(0, sys.run("apt-get install -y mesa-utils", ::log))
+        val d = LinuxDisplay(sys, 5, appMode = true)
+        try {
+            val size = System.getProperty("kdx.fpsSize") ?: "640x480"
+            d.start(size.substringBefore('x').toInt(), size.substringAfter('x').toInt())
+            d.appProcess = d.launch(System.getProperty("kdx.fpsApp") ?: "glxgears -geometry $size")
+            Thread.sleep(3000)
+            var rfb = RfbClient(port = d.port)
+            for ((cu, native) in listOf(true to false, true to true)) {
+                val fence = cu
+                rfb = RfbClient(port = d.port, useContinuous = cu, useFence = fence, serverOrder = native); rfb.connect()
+                val th = Thread { runCatching { rfb.loop() } }.apply { isDaemon = true; start() }
+                Thread.sleep(2000)
+                val f0 = rfb.frames; val t0 = System.nanoTime()
+                Thread.sleep(4000)
+                val fps = (rfb.frames - f0) * 1e9 / (System.nanoTime() - t0)
+                println("FPS: %.1f (continuous=%s serverOrder=%s)".format(fps, cu, native))
+                if (native) File(work, "fps.txt").writeText("%.1f".format(fps))
+                if (!native) { rfb.close(); th.join(1000) }
+            }
+            val t = Thread {}
+            d.log.filter { !it.startsWith("Xvnc") && !it.startsWith("dbus") }.takeLast(6).forEach { println("  APP| $it") }
+            rfb.close(); t.join(1000)
+            assertTrue("continuous updates negotiated", rfb.continuous)
+        } finally {
+            d.stop(); sys.run("pkill -f 'Xvnc :5'; pkill glxgears; pkill -f kdx-app.xml")
+        }
+    }
+
+    /** Sound: apps play into DroidSystem's PulseAudio; the PCM stream KDX plays must carry that audio. */
+    @Test fun l_sound() {
+        assumeTrue(work != null && sys.isInstalled)
+        sys.ensureLayer()
+        if (!sys.hasCommand("usr/bin/pulseaudio")) assertEquals(0, sys.run("sound-setup", ::log))
+        val audio = LinuxAudio(sys)
+        try {
+            audio.start()
+            audio.log.forEach { println("  PA| $it") }
+            assertTrue("sound server is up", audio.isRunning())
+            val sock = java.net.Socket("127.0.0.1", LinuxAudio.PCM_PORT)
+            val input = sock.getInputStream()
+            fun nonSilent(ms: Long): Pair<Int, Int> {
+                val end = System.currentTimeMillis() + ms; var total = 0; var loud = 0
+                val buf = ByteArray(4096)
+                while (System.currentTimeMillis() < end) {
+                    val n = input.read(buf); if (n < 0) break
+                    for (i in 0 until n step 2) { total++; val v = (buf[i].toInt() and 0xFF) or (buf[i + 1].toInt() shl 8); if (kotlin.math.abs(v.toShort().toInt()) > 1000) loud++ }
+                }
+                return total to loud
+            }
+            val (quietTotal, quietLoud) = nonSilent(800)
+            println("idle: $quietTotal samples, $quietLoud loud")
+            // play 2 s of a loud 440 Hz square wave from inside DroidSystem, like an app would
+            val player = sys.command(listOf("/bin/bash", "-c",
+                "perl -e 'for(\$i=0;\$i<96000;\$i++){\$v=((\$i/55)%2)?12000:-12000; print pack(\"ss\",\$v,\$v)}' | " +
+                    "pacat --raw --format=s16le --rate=48000 --channels=2 --latency-msec=100"),
+                env = mapOf("PULSE_SERVER" to LinuxAudio.PULSE_SERVER)).start()
+            val (total, loud) = nonSilent(2500)
+            println("playing: $total samples, $loud loud; player: " + player.inputStream.bufferedReader().readText().trim() + " rc=" + player.waitFor())
+            sock.close()
+            assertTrue("PCM stream flows", total > 100_000)
+            assertTrue("sound from the app arrives (loud samples: $loud)", loud > total / 4)
+        } finally {
+            audio.stop(); sys.run("pkill pulseaudio")
+        }
     }
 }

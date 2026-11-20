@@ -54,3 +54,21 @@ class RfbClientTest {
         rfb.close(); server.close()
     }
 }
+
+/** Client throughput against a VNC server given by -Pkdx.vncPort (skipped otherwise). */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
+class RfbThroughputTest {
+    @Test fun framesPerSecond() {
+        val port = System.getProperty("kdx.vncPort")?.toIntOrNull()
+        org.junit.Assume.assumeTrue(port != null)
+        val rfb = RfbClient(port = port!!)
+        rfb.connect()
+        thread(isDaemon = true) { runCatching { rfb.loop() } }
+        Thread.sleep(2000)
+        val f0 = rfb.frames; val t0 = System.nanoTime()
+        Thread.sleep(5000)
+        println("CLIENT FPS: %.1f at %dx%d (continuous=%s)".format((rfb.frames - f0) * 1e9 / (System.nanoTime() - t0), rfb.width, rfb.height, rfb.continuous))
+        rfb.close()
+    }
+}

@@ -9,12 +9,34 @@ import java.net.Socket
 /**
  * Minimal RFB (VNC) client for the local X display that DroidSystem's Linux apps draw on.
  * Supports RFB 3.3–3.8, "None" security, Raw + CopyRect + DesktopSize encodings, pointer, keys and clipboard.
- * The framebuffer is kept as ARGB ints so it can be copied straight into an Android Bitmap.
+ *
+ * Built for 60 fps: the framebuffer is kept as bytes in Android's own ARGB_8888 memory order (R,G,B,A), so pixel
+ * rows are read straight into it and the whole frame goes to a Bitmap with one native copy; with Continuous
+ * Updates (+ Fence for pacing) the server pushes frames as they change instead of waiting for requests.
  */
-class RfbClient(private val host: String = "127.0.0.1", private val port: Int) {
+class RfbClient(
+    private val host: String = "127.0.0.1",
+    private val port: Int,
+    private val useContinuous: Boolean = true,
+    private val useFence: Boolean = true,
+    /** Ask for the X server's own pixel layout (B,G,R,pad bytes): no conversion on the server side. */
+    val serverOrder: Boolean = false,
+) {
     @Volatile var width = 0; private set
     @Volatile var height = 0; private set
-    @Volatile var pixels = IntArray(0); private set
+    /** Framebuffer, 4 bytes per pixel in R,G,B,A order (= Android Bitmap.Config.ARGB_8888 memory layout). */
+    @Volatile var buffer = ByteArray(0); private set
+    /** The framebuffer as ARGB ints (a converted copy – for tests and screenshots). */
+    val pixels: IntArray
+        get() {
+            val b = buffer
+            return IntArray(b.size / 4) { i ->
+                val k = i * 4
+                (0xFF shl 24) or ((b[k].toInt() and 0xFF) shl 16) or ((b[k + 1].toInt() and 0xFF) shl 8) or (b[k + 2].toInt() and 0xFF)
+            }
+        }
+    /** Frames received so far (for measuring the frame rate). */
+    @Volatile var frames = 0L; private set
     @Volatile var name = ""; private set
     @Volatile var running = false; private set
     private lateinit var sock: Socket
@@ -56,16 +78,19 @@ class RfbClient(private val host: String = "127.0.0.1", private val port: Int) {
         width = input.readUnsignedShort(); height = input.readUnsignedShort()
         input.skipBytes(16) // server pixel format – we set our own
         name = ByteArray(input.readInt()).also { input.readFully(it) }.toString(Charsets.UTF_8)
-        pixels = IntArray(width * height)
-        // 32bpp, depth 24, little endian, true colour, rgb max 255, shifts R16 G8 B0 => 0x00RRGGBB
+        buffer = ByteArray(width * height * 4)
+        // 32bpp, depth 24, little endian, true colour, shifts R0 G8 B16 => bytes R,G,B,pad – Android's RGBA order
         out.writeByte(0); out.write(ByteArray(3))
         out.writeByte(32); out.writeByte(24); out.writeByte(0); out.writeByte(1)
         out.writeShort(255); out.writeShort(255); out.writeShort(255)
-        out.writeByte(16); out.writeByte(8); out.writeByte(0); out.write(ByteArray(3))
+        if (serverOrder) { out.writeByte(16); out.writeByte(8); out.writeByte(0) } else { out.writeByte(0); out.writeByte(8); out.writeByte(16) }
+        out.write(ByteArray(3))
         // Cursor (-239): the server sends the pointer shape separately instead of drawing it into the picture –
         // we never draw it, which hides the mouse pointer (touch screens don't need one).
         // ExtendedDesktopSize (-308): lets us resize the X screen to fit the KDX window.
-        val encodings = intArrayOf(1 /* CopyRect */, 0 /* Raw */, -223 /* DesktopSize */, -308 /* ExtendedDesktopSize */, -239 /* Cursor */)
+        // ContinuousUpdates (-313) + Fence (-312): the server pushes frames (paced by fences) without requests.
+        val encodings = listOfNotNull(1 /* CopyRect */, 0 /* Raw */, -223 /* DesktopSize */, -308 /* ExtendedDesktopSize */,
+            -239 /* Cursor */, (-313).takeIf { useContinuous } /* ContinuousUpdates */, (-312).takeIf { useFence } /* Fence */)
         out.writeByte(2); out.writeByte(0); out.writeShort(encodings.size); encodings.forEach { out.writeInt(it) }
         requestUpdate(false)
         running = true
@@ -86,7 +111,20 @@ class RfbClient(private val host: String = "127.0.0.1", private val port: Int) {
         try {
             while (running) {
                 when (val type = input.readUnsignedByte()) {
-                    0 -> { readUpdate(); onFrame(); requestUpdate(true) }
+                    0 -> { readUpdate(); frames++; onFrame(); if (!continuous) requestUpdate(true) }
+                    150 -> { // EndOfContinuousUpdates: the server supports them – switch them on
+                        if (!continuous) { continuous = true; enableContinuous() }
+                    }
+                    248 -> { // ServerFence: answer it, so the server can pace frames to what we keep up with
+                        input.skipBytes(3)
+                        val flags = input.readInt()
+                        val payload = ByteArray(input.readUnsignedByte()).also { input.readFully(it) }
+                        if (flags and FENCE_REQUEST != 0) send {
+                            out.writeByte(248); out.write(ByteArray(3))
+                            out.writeInt(flags and (FENCE_BLOCK_BEFORE or FENCE_BLOCK_AFTER or FENCE_SYNC_NEXT))
+                            out.writeByte(payload.size); out.write(payload)
+                        }
+                    }
                     1 -> { input.skipBytes(3); val n = input.readUnsignedShort(); input.skipBytes(n * 6) } // colour map
                     2 -> {} // bell
                     3 -> { input.skipBytes(3); onClipboard(ByteArray(input.readInt()).also { input.readFully(it) }.toString(Charsets.ISO_8859_1)) }
@@ -96,12 +134,21 @@ class RfbClient(private val host: String = "127.0.0.1", private val port: Int) {
         } finally { close() }
     }
 
+    /** True once the server pushes frames by itself (Continuous Updates). */
+    @Volatile var continuous = false; private set
+
+    private fun enableContinuous() = send {
+        out.writeByte(150); out.writeByte(1)
+        out.writeShort(0); out.writeShort(0); out.writeShort(width); out.writeShort(height)
+    }
+
     /** True once the server said it supports client-requested resizing. */
     @Volatile var canResize = false; private set
     private var screenId = 0
 
     private fun resizeTo(w: Int, h: Int) {
-        width = w; height = h; pixels = IntArray(w * h); onResize(w, h)
+        width = w; height = h; buffer = ByteArray(w * h * 4); onResize(w, h)
+        if (continuous) enableContinuous() // continuous updates cover a fixed area: extend it to the new size
         // X clamps the pointer into the new screen; re-claim its position so it isn't drawn
         pointer(minOf(lastX, w - 1), minOf(lastY, h - 1), 0)
     }
@@ -126,25 +173,25 @@ class RfbClient(private val host: String = "127.0.0.1", private val port: Int) {
             val x = input.readUnsignedShort(); val y = input.readUnsignedShort()
             val w = input.readUnsignedShort(); val h = input.readUnsignedShort()
             when (val enc = input.readInt()) {
-                0 -> { // Raw
-                    val row = ByteArray(w * 4)
+                0 -> { // Raw: rows go straight into the framebuffer; only the padding byte becomes opaque alpha
+                    val buf = buffer
+                    val cw = maxOf(0, minOf(w, width - x))
                     for (j in 0 until h) {
-                        input.readFully(row)
-                        val base = (y + j) * width + x
-                        if (y + j >= height) continue
-                        var k = 0
-                        for (i in 0 until minOf(w, width - x)) {
-                            pixels[base + i] = (0xFF shl 24) or ((row[k + 2].toInt() and 0xFF) shl 16) or
-                                ((row[k + 1].toInt() and 0xFF) shl 8) or (row[k].toInt() and 0xFF)
-                            k += 4
-                        }
+                        if (y + j >= height || cw == 0) { input.skipBytes(w * 4); continue }
+                        val off = ((y + j) * width + x) * 4
+                        input.readFully(buf, off, cw * 4)
+                        if (w > cw) input.skipBytes((w - cw) * 4)
+                        var k = off + 3
+                        val end = off + cw * 4
+                        while (k < end) { buf[k] = -1; k += 4 }
                     }
                 }
                 1 -> { // CopyRect
                     val sx = input.readUnsignedShort(); val sy = input.readUnsignedShort()
-                    val tmp = IntArray(w * h)
-                    for (j in 0 until h) System.arraycopy(pixels, (sy + j) * width + sx, tmp, j * w, w)
-                    for (j in 0 until h) System.arraycopy(tmp, j * w, pixels, (y + j) * width + x, w)
+                    val buf = buffer
+                    val tmp = ByteArray(w * h * 4)
+                    for (j in 0 until h) System.arraycopy(buf, ((sy + j) * width + sx) * 4, tmp, j * w * 4, w * 4)
+                    for (j in 0 until h) System.arraycopy(tmp, j * w * 4, buf, ((y + j) * width + x) * 4, w * 4)
                 }
                 -223 -> { // DesktopSize
                     resizeTo(w, h)
@@ -219,6 +266,10 @@ class RfbClient(private val host: String = "127.0.0.1", private val port: Int) {
     }
 
     companion object {
+        private const val FENCE_BLOCK_BEFORE = 1
+        private const val FENCE_BLOCK_AFTER = 2
+        private const val FENCE_SYNC_NEXT = 4
+        private const val FENCE_REQUEST = 1 shl 31
         const val KEY_BACKSPACE = 0xff08
         const val KEY_TAB = 0xff09
         const val KEY_RETURN = 0xff0d

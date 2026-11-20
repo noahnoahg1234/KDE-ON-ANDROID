@@ -34,6 +34,8 @@ class LinuxDisplay(
         "DISPLAY" to ":$display", "XDG_RUNTIME_DIR" to "/tmp/runtime-root", "NO_AT_BRIDGE" to "1",
         // abstract socket: no file path, so it works the same in DroidSystem and in every Flatpak sandbox
         "DBUS_SESSION_BUS_ADDRESS" to SESSION_BUS,
+        // sound goes to DroidSystem's PulseAudio server (see LinuxAudio)
+        "PULSE_SERVER" to LinuxAudio.PULSE_SERVER,
         // X11 everywhere: there is no Wayland compositor
         "GDK_BACKEND" to "x11", "QT_QPA_PLATFORM" to "xcb", "SDL_VIDEODRIVER" to "x11", "CLUTTER_BACKEND" to "x11",
         "ELECTRON_OZONE_PLATFORM_HINT" to "x11", "MOZ_ENABLE_WAYLAND" to "0",
@@ -88,7 +90,9 @@ class LinuxDisplay(
         ensureSessionBus()
         server = sys.command(
             listOf("Xvnc", ":$display", "-geometry", "${w}x$h", "-depth", "24", "-SecurityTypes", "None",
-                "-localhost", "-rfbport", "$port", "-AlwaysShared", "-ac", "-nolisten", "tcp", "-AcceptSetDesktopSize"),
+                "-localhost", "-rfbport", "$port", "-AlwaysShared", "-ac", "-nolisten", "tcp", "-AcceptSetDesktopSize",
+                // up to 60 frames a second; CompareFB=0 skips re-comparing pixels for every update (saves CPU)
+                "-FrameRate", "60", "-CompareFB", "0"),
         ).start().also { drain(it, "Xvnc") }
         val deadline = System.currentTimeMillis() + 20_000
         while (!portOpen()) {
@@ -313,5 +317,58 @@ class FlatpakRunner(val sys: DebianSystem, private val display: LinuxDisplay) {
             cmd.indexOfFirst { it.startsWith("DISPLAY=") }.takeIf { it >= 0 }?.let { cmd[it] = "DISPLAY=:${on.display}" }
         }
         return pb.start().also { it.outputStream.close(); on.drain(it, id) }
+    }
+}
+
+
+/**
+ * Sound for Linux apps: PulseAudio runs inside DroidSystem with a virtual speaker ("kdx"). Apps (Debian and
+ * Flatpak) connect over TCP ([PULSE_SERVER]); everything played into the speaker is streamed as raw 48 kHz
+ * stereo 16-bit PCM on [PCM_PORT], which KDX plays through Android (AndroidAudio). TCP avoids shared memory and
+ * socket files, which don't work reliably under proot.
+ */
+class LinuxAudio(val sys: DebianSystem) {
+    @Volatile private var server: Process? = null
+    val log = java.util.concurrent.ConcurrentLinkedDeque<String>()
+
+    val isSetUp get() = sys.hasCommand("usr/bin/pulseaudio")
+
+    fun isRunning() = server?.isAlive == true && portOpen(PCM_PORT)
+
+    private fun portOpen(p: Int) = runCatching { Socket().use { it.connect(InetSocketAddress("127.0.0.1", p), 300) } }.isSuccess
+
+    @Synchronized
+    fun start() {
+        if (isRunning() || !isSetUp) return
+        if (!File(sys.root, CONFIG).isFile) File(sys.root, CONFIG).apply { parentFile?.mkdirs() }.writeText(PA_CONFIG)
+        server?.destroy()
+        server = sys.command(listOf("pulseaudio", "-n", "-F", "/$CONFIG", "--daemonize=no", "--exit-idle-time=-1",
+            "--disallow-exit=true", "--use-pid-file=no", "--disable-shm=true", "--log-target=stderr",
+            "--system=false", "--realtime=false", "--high-priority=false"), env = mapOf("HOME" to "/root")).start().also { p ->
+            p.outputStream.close()
+            Thread { runCatching { p.inputStream.bufferedReader().forEachLine { log.add(it); while (log.size > 100) log.pollFirst() } } }
+                .apply { isDaemon = true }.start()
+        }
+        val deadline = System.currentTimeMillis() + 15_000
+        while (!portOpen(PCM_PORT) && System.currentTimeMillis() < deadline && server?.isAlive == true) Thread.sleep(150)
+    }
+
+    fun stop() { server?.destroy(); server = null }
+
+    companion object {
+        const val NATIVE_PORT = 4714
+        const val PCM_PORT = 4713
+        const val RATE = 48000
+        const val PULSE_SERVER = "tcp:127.0.0.1:4714"
+        const val CONFIG = "etc/pulse/kdx.pa"
+        val PA_CONFIG = """
+            |.fail
+            |load-module module-null-sink sink_name=kdx rate=$RATE channels=2 sink_properties=device.description=KDX
+            |set-default-sink kdx
+            |load-module module-native-protocol-tcp port=$NATIVE_PORT listen=127.0.0.1 auth-anonymous=1
+            |load-module module-simple-protocol-tcp port=$PCM_PORT listen=127.0.0.1 source=kdx.monitor record=true playback=false rate=$RATE channels=2 format=s16le
+            |.nofail
+            |load-module module-always-sink
+            |""".trimMargin()
     }
 }
