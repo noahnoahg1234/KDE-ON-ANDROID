@@ -202,6 +202,22 @@ class ShellScreenshotTest {
         assertTrue("bundled blocklist in the app (${list.size})", list.size > 50_000)
     }
 
+    @Test fun realKdeSetting() {
+        rule.runOnUiThread { state.open(KApp.SETTINGS) }
+        rule.mainClock.advanceTimeBy(1500)
+        shot("72-real-kde-setting")
+        rule.onNodeWithText("Use real KDE Plasma").assertExists()
+        rule.onNodeWithText("Phone's resolution").assertExists()
+        // 1080x2340 phone: native pixels, or as few as Plasma needs (720 on the short side)
+        state.changePlasmaResolution(org.kdx.shell.core.PlasmaResolution.PHONE)
+        assertEquals(1080 to 2340, state.plasmaGeometry(1080, 2340))
+        state.changePlasmaResolution(org.kdx.shell.core.PlasmaResolution.FAST)
+        assertEquals(720 to 1560, state.plasmaGeometry(1080, 2340))
+        state.changePlasmaResolution(org.kdx.shell.core.PlasmaResolution.BALANCED)
+        assertEquals(864 to 1872, state.plasmaGeometry(1080, 2340))
+        state.changePlasmaResolution(org.kdx.shell.core.PlasmaResolution.PHONE)
+    }
+
     @Test fun privacyVpnPage() {
         rule.runOnUiThread { state.open(KApp.PRIVACY) }
         rule.mainClock.advanceTimeBy(2000); Thread.sleep(500); rule.mainClock.advanceTimeBy(500)

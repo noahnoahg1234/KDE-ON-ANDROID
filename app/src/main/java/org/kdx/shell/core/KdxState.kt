@@ -22,6 +22,7 @@ import androidx.core.graphics.drawable.toBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.kdx.shell.droid.DroidSystem
@@ -371,6 +372,79 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     fun launchLinuxGui(cmd: String, title: String? = null, icon: File? = null) =
         openAppWindow(title ?: cmd.substringBefore(' ').substringAfterLast('/'), icon) { d -> d.launch(cmd) }
 
+    // ---- Real KDE Plasma as the desktop (System Settings → Real KDE Plasma) ----
+    /** When on, KDX sets up everything real KDE Plasma needs, then starts it full screen (also every time KDX opens). */
+    var realKde by mutableStateOf(prefs.getBoolean("realKde", false)); private set
+    var plasmaResolution by mutableStateOf(PlasmaResolution.entries.getOrElse(prefs.getInt("plasmaRes", 0)) { PlasmaResolution.PHONE }); private set
+    /** What the automatic setup is doing right now (null when idle or done). */
+    var realKdeStep by mutableStateOf<String?>(null); private set
+    private var realKdeJob: kotlinx.coroutines.Job? = null
+    private var plasmaSetupOpened = false
+    private var droidRequested = false
+
+    fun changeRealKde(on: Boolean) {
+        realKde = on; prefs.edit().putBoolean("realKde", on).apply()
+        if (on) { plasmaSetupOpened = false; droidRequested = false; runRealKde() }
+        else { realKdeJob?.cancel(); realKdeStep = null; windows.filter { it.fullscreen }.forEach { close(it) } }
+    }
+
+    /** Runs the KDE Plasma installer in Konsole again (e.g. after a failed download). */
+    fun retryPlasmaSetup() { plasmaSetupOpened = false; if (realKde) runRealKde() else open(KApp.KONSOLE, "plasma-setup") }
+
+    fun changePlasmaResolution(r: PlasmaResolution) {
+        plasmaResolution = r; prefs.edit().putInt("plasmaRes", r.ordinal).apply()
+        // the scale factor is chosen when the session starts, so restart a running one
+        if (windows.any { it.fullscreen }) {
+            windows.filter { it.fullscreen }.forEach { close(it) }
+            viewModelScope.launch { delay(1500); launchPlasma() }
+        }
+    }
+
+    /** One step at a time: Linux system → Debian → display server + Plasma → start. */
+    private fun runRealKde() {
+        if (realKdeJob?.isActive == true) return
+        realKdeJob = viewModelScope.launch {
+            while (realKde) {
+                val deb = debian
+                val dp = droidProgress; val bp = debianProgress
+                when {
+                    dp != null -> realKdeStep = "Installing the Linux system: ${dp.second}"
+                    droid == null -> {
+                        if (droidRequested) { realKdeStep = "Couldn't turn on the Linux system. Try again below."; return@launch }
+                        droidRequested = true; realKdeStep = "Turning on the Linux system…"; enableDroid()
+                    }
+                    bp != null -> realKdeStep = "Building Debian: ${bp.second}"
+                    deb == null -> {
+                        if (debianError != null) { realKdeStep = "Building Debian failed: tap Retry in Linux System below."; return@launch }
+                        realKdeStep = "Building Debian…"; installDebian()
+                    }
+                    !org.kdx.shell.droid.KdePlasma.isInstalled(deb) || !deb.hasCommand("usr/bin/Xvnc") -> {
+                        realKdeStep = "Installing KDE Plasma in Konsole (about 320 MB). Keep KDX open."
+                        if (!plasmaSetupOpened) { plasmaSetupOpened = true; open(KApp.KONSOLE, "plasma-setup") }
+                    }
+                    else -> { realKdeStep = null; if (windows.none { it.fullscreen }) launchPlasma(); return@launch }
+                }
+                delay(3000)
+            }
+        }
+    }
+
+    /**
+     * X screen size for KDE Plasma in a [wPx] x [hPx] area. Phone's resolution = one X pixel per screen pixel.
+     * Plasma's interface is then scaled ([plasmaScale]) so the short side is about 720 logical pixels: big enough
+     * to use with fingers, small enough for Plasma's panels and menus to fit.
+     */
+    fun plasmaGeometry(wPx: Int, hPx: Int): Pair<Int, Int> {
+        val minDim = minOf(wPx, hPx).coerceAtLeast(1)
+        val xMin = maxOf(PLASMA_MIN_SIDE, minDim * plasmaResolution.pixels).coerceAtMost(minDim.toFloat())
+        val r = xMin / minDim
+        return (wPx * r).toInt().coerceIn(320, 4096) to (hPx * r).toInt().coerceIn(240, 4096)
+    }
+
+    /** Plasma's interface scale for an X screen whose short side is [xMinDim] pixels (at most the phone's density). */
+    fun plasmaScale(xMinDim: Int): Float =
+        ((xMinDim / PLASMA_MIN_SIDE).coerceIn(1f, ctx.resources.displayMetrics.density.coerceAtLeast(1f)) * 20).toInt() / 20f
+
     /**
      * Starts the real KDE Plasma desktop (installed with plasma-setup) full screen on its own display. A second call
      * brings the running session back instead of starting another.
@@ -388,9 +462,14 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         appDisplays[n] = disp
         org.kdx.shell.droid.LinuxAppsService.update(ctx, appDisplays.size)
         val dm = ctx.resources.displayMetrics
-        val wDp = dm.widthPixels / dm.density
-        val hDp = dm.heightPixels / dm.density
-        val f = xScale(wDp)
+        val (xw, xh) = plasmaGeometry(dm.widthPixels, dm.heightPixels)
+        val scale = plasmaScale(minOf(xw, xh))
+        val scaleEnv = mapOf(
+            "QT_SCREEN_SCALE_FACTORS" to "%.2f".format(java.util.Locale.US, scale),
+            "GDK_SCALE" to scale.toInt().coerceAtLeast(1).toString(),
+            "GDK_DPI_SCALE" to "%.2f".format(java.util.Locale.US, scale / scale.toInt().coerceAtLeast(1)),
+            "XCURSOR_SIZE" to (24 * scale).toInt().toString(),
+        )
         closeMenus()
         val w = KWindow(nextId++, KApp.LINUXDISPLAY, "app:$n", currentDesktop, maximized = true)
         w.title = "KDE Plasma"; w.fullscreen = true
@@ -400,9 +479,9 @@ class KdxState(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.IO) {
                     ensureSound()
                     org.kdx.shell.droid.KdePlasma.writeDefaults(deb)
-                    disp.start((wDp * f).toInt(), (hDp * f).toInt())
+                    disp.start(xw, xh)
                     disp.logFile = newLogFile("KDE Plasma")
-                    val start = { disp.launch(org.kdx.shell.droid.KdePlasma.COMMAND, org.kdx.shell.droid.KdePlasma.env) }
+                    val start = { disp.launch(org.kdx.shell.droid.KdePlasma.COMMAND, org.kdx.shell.droid.KdePlasma.env + scaleEnv) }
                     disp.relaunch = { disp.logFile = newLogFile("KDE Plasma"); start() }
                     disp.appProcess = start()
                 }
@@ -558,6 +637,8 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     init {
         reloadApps()
         reloadDroid()
+        // real KDE Plasma as the desktop: start it (or continue setting it up) when KDX opens
+        if (realKde) viewModelScope.launch { delay(2500); runRealKde() }
     }
 
     fun reloadApps() {
@@ -757,4 +838,14 @@ enum class LinuxPerformance(val label: String, val scale: Float, val description
     SHARP("Sharp", 1f, "Full resolution"),
     BALANCED("Balanced", 0.75f, "75% resolution – faster"),
     FAST("Fast", 0.55f, "55% resolution – fastest, softer picture"),
+}
+
+/** Logical pixels on the short side of KDE Plasma's screen: room for its panels and menus on a phone. */
+const val PLASMA_MIN_SIDE = 720f
+
+/** How many pixels KDE Plasma draws (System Settings → Real KDE Plasma). [pixels] = share of the screen's pixels per side. */
+enum class PlasmaResolution(val label: String, val description: String, val pixels: Float) {
+    PHONE("Phone's resolution", "Every pixel of your screen: sharpest. Needs a fast phone.", 1f),
+    BALANCED("Balanced", "About 80% of the pixels per side, scaled up: smoother.", 0.8f),
+    FAST("Fast", "The fewest pixels Plasma needs: smoothest on slower phones.", 0f),
 }

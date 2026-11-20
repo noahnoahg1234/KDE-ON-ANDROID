@@ -147,8 +147,13 @@ KDX's own shell is an Android look-alike, but DroidSystem 2 can also run the **r
 KWin, plasmashell with the real panel, Kickoff and system tray, plus Dolphin, Konsole, Kate, Okular, Gwenview, Ark,
 KCalc, Spectacle, System Monitor, Info Center and System Settings.
 
-- **Install:** open **KDE Plasma** in Kickoff. The first time, it runs `plasma-setup` in Konsole (about 320 MB to
-  download, 1.2 GB on disk).
+- **Easiest:** System Settings → **Real KDE Plasma** → turn on **Use real KDE Plasma**. KDX does every step by
+  itself (Linux system, Debian base, Plasma: about 320 MB to download, 1.2 GB on disk), then starts Plasma full
+  screen, and again every time KDX opens.
+- **Resolution:** *Phone's resolution* (default) draws every pixel of your screen, with Plasma's interface scaled so
+  the short side is about 720 logical pixels (big enough to tap, room for panels and menus). *Balanced* and *Fast*
+  draw fewer pixels for smoother motion on slower phones.
+- **Manually:** open **KDE Plasma** in Kickoff. The first time, it runs `plasma-setup` in Konsole.
 - **Run:** Plasma starts full screen on its own X display, with touch and the on-screen keyboard. The **K** button in
   the corner goes back to KDX (Plasma keeps running), shows it in a window, or ends the session.
 - **Tuned for phones:** no systemd, no compositing, Qt Quick's software renderer (no GPU needed), tablet mode,

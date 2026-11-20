@@ -210,7 +210,7 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
             delay(2000)
             val fps = (((s.rfb?.frames ?: 0L) - f0) / 2).toInt()
             s.fps = fps
-            if (appNo == null || state.linuxPerformance != org.kdx.shell.core.LinuxPerformance.AUTO) continue
+            if (appNo == null || disp.desktop || state.linuxPerformance != org.kdx.shell.core.LinuxPerformance.AUTO) continue
             if (scaler.update(fps)) s.autoScale = scaler.scale
         }
     }
@@ -270,9 +270,14 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
             val bmp = s.bitmap
             var size by remember { mutableStateOf(IntSize.Zero) }
             // app windows: make the X screen match this window's shape (debounced)
-            if (appNo != null) LaunchedEffect(size, s.connected, s.autoScale, state.linuxPerformance) {
+            if (appNo != null) LaunchedEffect(size, s.connected, s.autoScale, state.linuxPerformance, state.plasmaResolution) {
                 if (!s.connected || size.width == 0) return@LaunchedEffect
                 delay(500)
+                if (disp.desktop) { // KDE Plasma: its own resolution setting (phone's resolution = 1:1 pixels)
+                    val (xw, xh) = state.plasmaGeometry(size.width, size.height)
+                    s.rfb?.setDesktopSize(xw, xh)
+                    return@LaunchedEffect
+                }
                 val wDp = size.width / density; val hDp = size.height / density
                 val f = state.xScale(wDp) * (if (state.linuxPerformance == org.kdx.shell.core.LinuxPerformance.AUTO) s.autoScale else 1f)
                 s.rfb?.setDesktopSize(((wDp * f).toInt() / 8 * 8).coerceIn(320, 3840), (hDp * f).toInt().coerceIn(240, 2160))

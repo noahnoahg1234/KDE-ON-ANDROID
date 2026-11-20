@@ -260,6 +260,7 @@ fun SystemSettings(state: KdxState, w: KWindow) {
     fun set(block: () -> Unit) { block(); state.save() }
 
     Column(Modifier.fillMaxSize().background(c.window).verticalScroll(scroll)) {
+        RealKdeSection(state)
         LinuxSystemSection(state)
         Section("Wallpaper", Icons.Filled.Wallpaper) {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -346,6 +347,67 @@ private fun Toggle(label: String, value: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().clickable { onChange(!value) }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f), color = c.text, fontSize = 14.sp)
         Switch(value, onChange)
+    }
+}
+
+/**
+ * System Settings → Real KDE Plasma: one switch that sets up everything (Linux system, Debian, Plasma) and then runs
+ * the real KDE Plasma desktop full screen, at the phone's own resolution if wanted.
+ */
+@Composable
+private fun RealKdeSection(state: KdxState) {
+    val c = LocalBreeze.current
+    val deb = state.debian
+    val plasmaReady = deb != null && org.kdx.shell.droid.KdePlasma.isInstalled(deb) && deb.hasCommand("usr/bin/Xvnc")
+    val running = state.windows.any { it.fullscreen }
+    Section("Real KDE Plasma", Icons.Filled.Dashboard) {
+        Text(
+            "Runs the real KDE Plasma 6 desktop from Debian (KWin, Plasma panel, Kickoff, Dolphin, Konsole, Kate, " +
+                "System Settings…) instead of KDX's look-alike. Turn it on and KDX does every step for you, then starts " +
+                "Plasma full screen, and again every time KDX opens.",
+            color = c.inactiveText, fontSize = 13.sp,
+        )
+        Spacer(Modifier.height(6.dp))
+        Toggle("Use real KDE Plasma", state.realKde) { state.changeRealKde(it) }
+        state.realKdeStep?.let { step ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (!step.contains("failed") && !step.contains("Couldn't")) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                Text(step, Modifier.padding(start = 8.dp), color = c.text, fontSize = 13.sp)
+            }
+        }
+        // the steps, so it's clear what's done and what's next
+        @Composable fun Step(done: Boolean, text: String) = Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
+            Icon(if (done) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked, null,
+                tint = if (done) c.positive else c.inactiveText, modifier = Modifier.size(18.dp))
+            Text(text, Modifier.padding(start = 8.dp), color = c.text, fontSize = 13.sp)
+        }
+        Step(state.droid != null, "1. Linux system (DroidSystem): about 35 MB")
+        Step(deb != null, "2. Debian base: built from official packages")
+        Step(plasmaReady, "3. KDE Plasma: about 320 MB download, 1.2 GB on disk")
+        Step(running, "4. Plasma running")
+
+        Spacer(Modifier.height(8.dp))
+        Text("Resolution", color = c.text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        org.kdx.shell.core.PlasmaResolution.entries.forEach { r ->
+            Row(Modifier.fillMaxWidth().clickable { state.changePlasmaResolution(r) }, verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(state.plasmaResolution == r, { state.changePlasmaResolution(r) })
+                Column {
+                    Text(r.label, color = c.text, fontSize = 14.sp)
+                    Text(r.description, color = c.inactiveText, fontSize = 11.sp)
+                }
+            }
+        }
+        val dm = androidx.compose.ui.platform.LocalContext.current.resources.displayMetrics
+        val (xw, xh) = state.plasmaGeometry(dm.widthPixels, dm.heightPixels)
+        Text("Plasma draws ${xw}×$xh pixels on your ${dm.widthPixels}×${dm.heightPixels} screen, with its interface " +
+            "scaled ${"%.2f".format(state.plasmaScale(minOf(xw, xh)))}× so it's easy to tap.", color = c.inactiveText, fontSize = 11.sp)
+
+        Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (plasmaReady) Button({ state.launchPlasma() }) { Text(if (running) "Show KDE Plasma" else "Start KDE Plasma") }
+            if (deb != null && !plasmaReady) OutlinedButton({ state.retryPlasmaSetup() }) { Text("Run installer again") }
+        }
+        Text("In Plasma, the small K button in the top corner takes you back to KDX. Plasma needs about 800 MB of RAM.",
+            color = c.inactiveText, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
     }
 }
 
