@@ -30,8 +30,15 @@ class LinuxDisplay(
 
     private fun portOpen() = runCatching { Socket().use { it.connect(InetSocketAddress("127.0.0.1", port), 300) } }.isSuccess
 
+    /** Marks every process started for this display (server, window manager, app) so they can all be stopped. */
+    @Volatile var tag = "d$display-${System.nanoTime()}"
+        private set
+
+    /** The Flatpak app shown on this display, if any. */
+    @Volatile var appId: String? = null
+
     val env get() = mapOf(
-        "DISPLAY" to ":$display", "XDG_RUNTIME_DIR" to "/tmp/runtime-root", "NO_AT_BRIDGE" to "1",
+        "DISPLAY" to ":$display", "KDX_TAG" to tag, "XDG_RUNTIME_DIR" to "/tmp/runtime-root", "NO_AT_BRIDGE" to "1",
         // abstract socket: no file path, so it works the same in DroidSystem and in every Flatpak sandbox
         "DBUS_SESSION_BUS_ADDRESS" to SESSION_BUS,
         // sound goes to DroidSystem's PulseAudio server (see LinuxAudio)
@@ -54,6 +61,10 @@ class LinuxDisplay(
         // Fission runs one process per web site; Android 12+ kills apps' extra child processes and phones are
         // short on memory, so keep Firefox to a few processes
         "MOZ_FORCE_DISABLE_FISSION" to "1",
+        // never hand over to (or wait for) another running Firefox: each window is its own instance
+        "MOZ_NO_REMOTE" to "1",
+        // a force-closed Firefox would otherwise ask to start in "Troubleshoot Mode" next time
+        "MOZ_DISABLE_AUTO_SAFE_MODE" to "1",
         "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS" to "1", "WEBKIT_FORCE_SANDBOX" to "0",
     )
 
@@ -125,8 +136,13 @@ class LinuxDisplay(
         sys.command(listOf("/bin/bash", "-lc", "exec $cmd"), "/root", env + extraEnv).start().also { it.outputStream.close(); drain(it, cmd.substringBefore(' ')) }
 
     fun stop() {
+        // ask the programs to quit first (Firefox saves its session), then force whatever remains; the proot
+        // processes alone aren't enough – the programs they ran can survive them
+        runCatching { Procs.stopEnv("KDX_TAG=$tag") }
         appProcess?.destroy(); wm?.destroy(); server?.destroy()
         appProcess = null; wm = null; server = null
+        runCatching { Procs.killEnv("KDX_TAG=$tag") }
+        tag = "d$display-${System.nanoTime()}" // fresh tag for a restart on this display
     }
 
     companion object {
@@ -221,7 +237,7 @@ class FlatpakRunner(val sys: DebianSystem, private val display: LinuxDisplay) {
     private val triplet get() = when (sys.arch) { "amd64" -> "x86_64-linux-gnu"; "arm64" -> "aarch64-linux-gnu"; "armhf" -> "arm-linux-gnueabihf"; else -> "i386-linux-gnu" }
 
     /** Builds the process that runs [id]. Throws with a readable message if something is missing. */
-    fun command(id: String, args: List<String> = emptyList()): ProcessBuilder {
+    fun command(id: String, args: List<String> = emptyList(), on: LinuxDisplay = display): ProcessBuilder {
         val app = appDir(id) ?: throw IOException("$id is not installed")
         val ini = DroidSystem.parseIni(File(app, "metadata").readText())
         val meta = ini["Application"] ?: throw IOException("$id: bad metadata")
@@ -275,7 +291,7 @@ class FlatpakRunner(val sys: DebianSystem, private val display: LinuxDisplay) {
         File(sb, "run/host/font-dirs.xml").takeIf { !it.exists() }
             ?.writeText("<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n<fontconfig></fontconfig>\n")
         gtkSettings(File(sys.root, "root/.var/app/$id/config"))
-        val env = display.env + mapOf(
+        val env = on.env + mapOf(
             "PATH" to "/app/bin:/run/kdx/bin:/usr/bin", "FLATPAK_ID" to id, "container" to "flatpak",
             "LD_LIBRARY_PATH" to (listOf("/app/lib", "/app/lib/$triplet") + ldExtra + "/usr/lib/$triplet/GL/default/lib").joinToString(":"),
             "XDG_DATA_DIRS" to "/app/share:/usr/share:/usr/share/runtime/share:/run/host/share",
@@ -310,14 +326,12 @@ class FlatpakRunner(val sys: DebianSystem, private val display: LinuxDisplay) {
     }
 
     fun launch(id: String, args: List<String> = emptyList(), on: LinuxDisplay = display): Process {
-        val pb = command(id, args)
-        // point the app at the display it was given
-        if (on !== display) {
-            val cmd = pb.command()
-            cmd.indexOfFirst { it.startsWith("DISPLAY=") }.takeIf { it >= 0 }?.let { cmd[it] = "DISPLAY=:${on.display}" }
-        }
-        return pb.start().also { it.outputStream.close(); on.drain(it, id) }
+        on.appId = id
+        return command(id, args, on).start().also { it.outputStream.close(); on.drain(it, id) }
     }
+
+    /** Stops any leftover processes of [id] (from a closed window, a crash or an earlier KDX session). */
+    fun killLeftovers(id: String) = runCatching { Procs.killEnv("FLATPAK_ID=$id") }
 }
 
 

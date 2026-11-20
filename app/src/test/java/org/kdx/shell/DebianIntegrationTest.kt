@@ -390,4 +390,54 @@ class DebianIntegrationTest {
             audio.stop(); sys.run("pkill pulseaudio")
         }
     }
+
+    private fun procsMatching(marker: String): List<Int> = (File("/proc").listFiles() ?: emptyArray())
+        .filter { it.name.all(Char::isDigit) }
+        .filter { runCatching { String(File(it, "cmdline").readBytes()).contains(marker) }.getOrDefault(false) }
+        .map { it.name.toInt() }
+
+    /** Reopening a Flatpak app after closing its window (Firefox exited with code 0 in ~3 s on a phone). */
+    @Test fun m_reopenFlatpak() {
+        val id = System.getProperty("kdx.flatpak") ?: "org.mozilla.firefox"
+        assumeTrue(work != null && sys.isInstalled && sys.hasCommand("usr/bin/Xvnc"))
+        val fp = FlatpakRunner(sys, LinuxDisplay(sys))
+        assumeTrue(fp.appDir(id) != null)
+        val d1 = LinuxDisplay(sys, 6, appMode = true)
+        val d2 = LinuxDisplay(sys, 7, appMode = true)
+        try {
+            d1.start(800, 600)
+            d1.appProcess = fp.launch(id, on = d1)
+            Thread.sleep(30_000)
+            println("FIRST: alive=${d1.appProcess!!.isAlive} title=${d1.windowTitle()}")
+            val ff = procsMatching("/app/lib/firefox").firstOrNull()
+            println("TAG ${d1.tag}: matched=${org.kdx.shell.droid.Procs.withEnv("KDX_TAG=${d1.tag}").size}; firefox pid=$ff env has tag: " +
+                (ff?.let { String(File("/proc/$it/environ").readBytes()).split('\u0000').filter { e -> e.startsWith("KDX_TAG") || e.startsWith("FLATPAK_ID") } }))
+            d1.stop() // what closing the KDX window does
+            Thread.sleep(3000)
+            val left = procsMatching("/app/lib/firefox") + procsMatching("Xvnc :6")
+            println("LEFTOVER after closing window: ${left.size} processes")
+            d2.start(800, 600)
+            val p2 = fp.launch(id, on = d2)
+            d2.appProcess = p2
+            Thread.sleep(15_000)
+            val code = if (p2.isAlive) "running" else "exited code ${p2.exitValue()}"
+            println("SECOND: $code title=${d2.windowTitle()}")
+            d2.appLog().takeLast(8).forEach { println("  2| $it") }
+            assertEquals("no processes left after closing the window", 0, left.size)
+            assertTrue("reopened app keeps running ($code)", p2.isAlive)
+            // an orphan KDX lost track of (window gone, display not stopped): launching again must clear it first
+            val d3 = LinuxDisplay(sys, 8, appMode = true)
+            try {
+                d3.start(800, 600)
+                fp.killLeftovers(id) // what KdxState.launchFlatpak does before every launch
+                val p3 = fp.launch(id, on = d3); d3.appProcess = p3
+                Thread.sleep(15_000)
+                println("THIRD (after orphan on display 7): " + if (p3.isAlive) "running" else "exited ${p3.exitValue()}")
+                assertTrue("launch after clearing an orphan keeps running", p3.isAlive)
+            } finally { d3.stop() }
+        } finally {
+            d1.stop(); d2.stop()
+            sys.run("pkill -f 'Xvnc :6'; pkill -f 'Xvnc :7'; pkill -f /app/lib/firefox; pkill -f kdx-app.xml")
+        }
+    }
 }

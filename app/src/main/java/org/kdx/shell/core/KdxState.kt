@@ -197,8 +197,16 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     private fun debianFor(classic: DroidSystem?): org.kdx.shell.droid.DebianSystem =
         org.kdx.shell.droid.AndroidLinux.debian(ctx, classic?.home)
 
+    private var orphansCleaned = false
+
     private fun attachDebian(d: org.kdx.shell.droid.DebianSystem?) {
         debian = d
+        if (d != null && !orphansCleaned) {
+            orphansCleaned = true
+            // Linux programs left running by an earlier KDX session (their windows are gone). On Android every
+            // process with KDX's user ID is KDX's own, and all DroidSystem programs carry HOSTNAME=droidsystem.
+            viewModelScope.launch(Dispatchers.IO) { runCatching { org.kdx.shell.droid.Procs.killEnv("HOSTNAME=droidsystem") } }
+        }
         if (d != null) {
             if (linuxDisplay?.sys?.root != d.root) {
                 linuxDisplay?.stop()
@@ -328,9 +336,12 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     /** Runs an installed Flatpak app in its own window, with its name and icon. */
     fun launchFlatpak(id: String) {
         val runner = flatpakRunner ?: run { toast("Turn on the Linux system first"); return }
+        // already open? bring that window forward instead of starting a second copy
+        windows.firstOrNull { w -> w.app == KApp.LINUXDISPLAY && w.arg?.removePrefix("app:")?.toIntOrNull()?.let { appDisplays[it]?.appId } == id }
+            ?.let { focus(it); return }
         val app = runner.installed().firstOrNull { it.id == id } ?: run { toast("$id is not installed"); return }
         val icon = runner.appDir(id)?.let { org.kdx.shell.droid.AndroidLinux.findIcon(listOf(File(it, "export")), id) }
-        openAppWindow(app.name, icon) { d -> runner.launch(id, on = d) }
+        openAppWindow(app.name, icon) { d -> runner.killLeftovers(id); runner.launch(id, on = d) }
     }
 
     /** Where a new DroidSystem goes: the phone's storage when KDX has file access, else KDX's private folder. */
