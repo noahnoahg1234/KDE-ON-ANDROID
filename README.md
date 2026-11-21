@@ -142,6 +142,17 @@ DroidSystem also keeps its original, fully offline layer in that folder (mounted
 Packages and Flatpaks containing desktop-Linux binaries can be installed and inspected, but only script-based apps
 (like everything DroidSystem ships) actually run.
 
+## Touch on the Linux Display
+X apps only understand a mouse, so touches are translated (`TouchTranslator`):
+- **Tap:** click. A small wobble is still a tap (8 dp slop), and a quick second tap lands on the first one, so
+  double-clicks work.
+- **Drag:** scroll, with the content following your finger and flinging on.
+- **Long press:** right-click, with a vibration when it triggers. Long press then drag drags with the left button.
+- **Two fingers:** tap = right-click, move = scroll (or pan when zoomed), pinch = zoom around your fingers.
+- **Three-finger tap:** middle-click (paste).
+- **Feedback:** each touch shows a fading ring, since the mouse pointer is hidden.
+- **Real mouse:** a USB, Bluetooth or DeX mouse works directly, with hover, all buttons and the wheel.
+
 ## Real KDE Plasma
 KDX's own shell is an Android look-alike, but DroidSystem 2 can also run the **real KDE Plasma 6** from Debian:
 KWin, plasmashell with the real panel, Kickoff and system tray, plus Dolphin, Konsole, Kate, Okular, Gwenview, Ark,

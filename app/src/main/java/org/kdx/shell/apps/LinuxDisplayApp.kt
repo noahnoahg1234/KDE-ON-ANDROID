@@ -25,6 +25,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.input.pointer.changedToDown
+import androidx.compose.ui.input.pointer.changedToUp
+import androidx.compose.ui.input.pointer.isPrimaryPressed
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.ImeAction
@@ -62,6 +67,9 @@ class DisplaySession : Closeable {
     /** Touch mode: drag scrolls like a touchscreen. Mouse mode: drag = mouse drag. */
     var touchMode by mutableStateOf(true)
     var modifiers by mutableIntStateOf(0) // bit0 ctrl, bit1 alt, bit2 super (sticky)
+    /** Where the screen was just touched (the mouse pointer is hidden, so taps get a visible mark instead). */
+    val marks = androidx.compose.runtime.mutableStateListOf<TouchMark>()
+    var markClock by mutableLongStateOf(0L)
     var onClose: () -> Unit = {}
     /** Frames per second over the last measurement (shown in the toolbar). */
     var fps by mutableIntStateOf(0)
@@ -119,6 +127,8 @@ class DisplaySession : Closeable {
 
     override fun close() { rfb?.close(); scope.cancel(); onClose() }
 }
+
+data class TouchMark(val pos: Offset, val kind: TouchTranslator.Kind, val at: Long)
 
 private const val M_CTRL = 1
 private const val M_ALT = 2
@@ -247,7 +257,8 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
             disp.logFile?.let { f ->
                 IconButton({ state.open(KApp.KATE, f.path) }, Modifier.size(40.dp)) { Icon(Icons.Filled.Article, "App log", tint = c.text) }
             }
-            Text(if (s.touchMode) "Touch: tap, drag to scroll, hold for right-click, hold+drag to drag" else "Mouse: drag = drag, hold = right-click",
+            Text(if (s.touchMode) "Tap = click · drag = scroll · hold = right-click · hold+drag = drag · 2 fingers: tap = right-click, pinch = zoom · 3-finger tap = paste"
+                else "Mouse mode: drag = drag · hold = right-click · 2-finger tap = right-click",
                 Modifier.weight(1f).padding(horizontal = 4.dp), color = c.inactiveText, fontSize = 11.sp, maxLines = 1)
             if (s.zoom > 1.01f) IconButton({ s.zoom = 1f; s.pan = Offset.Zero }, Modifier.size(40.dp)) { Icon(Icons.Filled.FitScreen, "Fit") }
             if (s.connected) Text(
@@ -293,10 +304,46 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
                 val scale = fit * s.zoom
                 val origin = Offset((size.width - bmp.width * scale) / 2f, (size.height - bmp.height * scale) / 2f) + s.pan
                 fun toFb(p: Offset) = ((p.x - origin.x) / scale).toInt() to ((p.y - origin.y) / scale).toInt()
+                val view = rememberUpdatedState(Triple(origin, scale, fit))
+                val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+                val touch = remember(s) {
+                    TouchTranslator(
+                        slopPx = 8f * density,
+                        toFb = { p -> val (o, sc, _) = view.value; ((p.x - o.x) / sc).toInt() to ((p.y - o.y) / sc).toInt() },
+                        out = { x, y, m -> s.rfb?.pointer(x, y, m) },
+                        // an X app scrolls roughly this many of its pixels per wheel step: the content then follows the finger
+                        scrollStepPx = { 56f * view.value.second },
+                        touchMode = { s.touchMode },
+                        zoomed = { s.zoom > 1.01f },
+                        onPinch = { f, c ->
+                            // zoom around the fingers: the X pixel under them stays under them
+                            val (o, sc, ft) = view.value
+                            val fbX = (c.x - o.x) / sc; val fbY = (c.y - o.y) / sc
+                            val z = (s.zoom * f).coerceIn(1f, 5f)
+                            val sc2 = ft * z
+                            val bw = s.bitmap?.width ?: 1; val bh = s.bitmap?.height ?: 1
+                            val base = Offset((size.width - bw * sc2) / 2f, (size.height - bh * sc2) / 2f)
+                            s.zoom = z
+                            s.pan = if (z <= 1.01f) Offset.Zero else Offset(c.x - fbX * sc2, c.y - fbY * sc2) - base
+                        },
+                        onPan = { d -> s.pan += d },
+                        haptic = { haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress) },
+                        mark = { p, k -> s.marks += TouchMark(p, k, android.os.SystemClock.uptimeMillis()) },
+                    )
+                }
+                // long press, fling and fading touch marks run on the frame clock
+                LaunchedEffect(touch) {
+                    while (true) {
+                        withFrameMillis { }
+                        val now = android.os.SystemClock.uptimeMillis()
+                        touch.tick(now)
+                        if (s.marks.isNotEmpty()) { s.marks.removeAll { now - it.at > 400 }; s.markClock = now }
+                    }
+                }
                 Canvas(
                     Modifier.fillMaxSize()
                         .onSizeChanged { size = it }
-                        .pointerInput(bmp, s.touchMode) { awaitEachGesture { gesture(s, ::toFb); s.tapCount++ } }
+                        .pointerInput(s) { touchInput(s, touch) }
                 ) {
                     s.frame // redraw on every frame
                     drawContext.canvas.save()
@@ -304,6 +351,16 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
                     drawContext.canvas.scale(scale, scale)
                     drawImage(bmp.asImageBitmap(), filterQuality = if (scale < 1f) FilterQuality.Medium else FilterQuality.Low)
                     drawContext.canvas.restore()
+                    // touch marks: a ring that grows and fades (tap white, right-click orange, middle green, hold blue)
+                    val now = s.markClock
+                    s.marks.forEach { m ->
+                        val age = ((now - m.at) / 350f).coerceIn(0f, 1f)
+                        val col = when (m.kind) { TouchTranslator.Kind.TAP -> Color.White; TouchTranslator.Kind.RIGHT -> Color(0xFFF67400)
+                            TouchTranslator.Kind.MIDDLE -> Color(0xFF27AE60); TouchTranslator.Kind.HOLD -> Color(0xFF3DAEE9) }
+                        drawCircle(col.copy(alpha = 0.55f * (1 - age)), radius = (14f + 16f * age) * density, center = m.pos,
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f * density))
+                        drawCircle(col.copy(alpha = 0.25f * (1 - age)), radius = 10f * density, center = m.pos)
+                    }
                 }
             }
             if (appNo != null && s.connected && !s.appReady) {
@@ -334,81 +391,37 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
     }
 }
 
-/** One touch gesture → X pointer events. */
-private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.gesture(s: DisplaySession, toFb: (Offset) -> Pair<Int, Int>) {
-    val down = awaitFirstDown()
-    val rfb = s.rfb ?: return
-    val start = down.position
-    val t0 = System.currentTimeMillis()
-    var moved = false
-    var held = false      // long-press reached before moving
-    var dragging = false  // button 1 held down
-    var multi = false
-    var lastDist = 0f
-    var lastCentroid = Offset.Zero
-    var lastScroll = start
-    var (fx, fy) = toFb(start)
-    rfb.pointer(fx, fy, 0)
+/** Feeds touches (and a real mouse) into the [TouchTranslator]. */
+private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.touchInput(s: DisplaySession, t: TouchTranslator) = awaitPointerEventScope {
+    var mouseButtons = 0
     while (true) {
-        val ev = withTimeoutOrNull(60) { awaitPointerEvent() }
-        if (ev == null) {
-            if (!moved && !held && System.currentTimeMillis() - t0 > 500) held = true
-            continue
-        }
-        val pressed = ev.changes.filter { it.pressed }
-        if (pressed.size >= 2) {
-            // two fingers: pinch to zoom, pan when zoomed, otherwise scroll
-            val a = pressed[0].position; val b = pressed[1].position
-            val dist = hypot(a.x - b.x, a.y - b.y); val cen = (a + b) / 2f
-            if (multi) {
-                if (lastDist > 0) s.zoom = (s.zoom * dist / lastDist).coerceIn(1f, 5f)
-                if (s.zoom > 1.01f) { s.pan += cen - lastCentroid; lastCentroid = cen }
-                else if (abs(cen.y - lastCentroid.y) > 30) {
-                    val (sx, sy) = toFb(cen); val btn = if (cen.y < lastCentroid.y) 16 else 8
-                    rfb.pointer(sx, sy, btn); rfb.pointer(sx, sy, 0); lastCentroid = cen
-                }
-            } else lastCentroid = cen
-            if (dragging) { rfb.pointer(fx, fy, 0); dragging = false }
-            multi = true; lastDist = dist
+        val ev = awaitPointerEvent()
+        val first = ev.changes.firstOrNull() ?: continue
+        if (first.type == androidx.compose.ui.input.pointer.PointerType.Mouse) {
+            // a real mouse (USB/Bluetooth/DeX): straight through, with hover, all buttons and the wheel
+            val rfb = s.rfb ?: continue
+            val (x, y) = t.mapForMouse(first.position)
+            if (ev.type == androidx.compose.ui.input.pointer.PointerEventType.Scroll) {
+                val d = first.scrollDelta
+                val btn = when { d.y > 0 -> 16; d.y < 0 -> 8; d.x > 0 -> 64; d.x < 0 -> 32; else -> 0 }
+                if (btn != 0) { rfb.pointer(x, y, mouseButtons or btn); rfb.pointer(x, y, mouseButtons) }
+            } else {
+                val b = ev.buttons
+                mouseButtons = (if (b.isPrimaryPressed) 1 else 0) or (if (b.isTertiaryPressed) 2 else 0) or (if (b.isSecondaryPressed) 4 else 0)
+                rfb.pointer(x, y, mouseButtons)
+                if (ev.type == androidx.compose.ui.input.pointer.PointerEventType.Press) s.tapCount++
+            }
             ev.changes.forEach { it.consume() }
             continue
         }
-        val ch = ev.changes.firstOrNull() ?: break
-        if (!ch.pressed) {
+        for (c in ev.changes) {
             when {
-                multi -> {}
-                dragging -> rfb.pointer(fx, fy, 0)
-                !moved -> {
-                    val right = held || System.currentTimeMillis() - t0 > 500
-                    rfb.pointer(fx, fy, if (right) 4 else 1); rfb.pointer(fx, fy, 0)
-                }
+                c.changedToDown() -> { t.down(c.id.value, c.position, c.uptimeMillis); s.tapCount++ }
+                c.changedToUp() -> t.up(c.id.value, c.position, c.uptimeMillis)
+                c.pressed && c.positionChanged() -> t.move(c.id.value, c.position, c.uptimeMillis)
             }
-            break
+            c.consume()
         }
-        if (multi || !ch.positionChanged()) continue
-        val dist = (ch.position - start).getDistance()
-        if (!moved && dist > 14f) {
-            moved = true
-            if (!s.touchMode || held) { dragging = true; rfb.pointer(fx, fy, 1) } // mouse mode, or hold-then-drag
-        }
-        if (dragging) {
-            toFb(ch.position).let { fx = it.first; fy = it.second }; rfb.pointer(fx, fy, 1)
-        } else if (moved) {
-            // touch scrolling: finger up = content moves up = wheel down (natural scrolling)
-            val dy = ch.position.y - lastScroll.y; val dx = ch.position.x - lastScroll.x
-            val step = 40f
-            if (abs(dy) >= step) {
-                val btn = if (dy < 0) 16 else 8
-                repeat((abs(dy) / step).toInt().coerceAtMost(5)) { rfb.pointer(fx, fy, btn); rfb.pointer(fx, fy, 0) }
-                lastScroll = Offset(lastScroll.x, ch.position.y)
-            }
-            if (abs(dx) >= step * 1.5f) {
-                val btn = if (dx < 0) 64 else 32 // buttons 7/6 = horizontal wheel
-                rfb.pointer(fx, fy, btn); rfb.pointer(fx, fy, 0)
-                lastScroll = Offset(ch.position.x, lastScroll.y)
-            }
-        }
-        ch.consume()
     }
 }
 

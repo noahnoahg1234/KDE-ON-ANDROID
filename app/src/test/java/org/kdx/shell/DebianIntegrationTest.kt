@@ -584,4 +584,30 @@ class DebianIntegrationTest {
         // running it again (already installed) is fine too
         assertEquals(0, sys.run("bazaar-setup", ::log))
     }
+
+    /** Touch gestures → TouchTranslator → VNC → the X server: xev shows which mouse buttons X apps receive. */
+    @Test fun s_touchReachesX() {
+        assumeTrue(work != null && sys.isInstalled && sys.hasCommand("usr/bin/xev"))
+        val d = LinuxDisplay(sys, 40, desktop = true)
+        try {
+            d.start(800, 600)
+            val xev = d.launch("xev -geometry 800x600+0+0 -event button")
+            Thread.sleep(2500)
+            val rfb = RfbClient(port = d.port); rfb.connect()
+            val loop = Thread { runCatching { rfb.loop() } }.apply { isDaemon = true; start() }
+            val t = org.kdx.shell.apps.TouchTranslator(slopPx = 20f, toFb = { it.x.toInt() to it.y.toInt() }, out = { x, y, m -> rfb.pointer(x, y, m) }, scrollStepPx = { 50f })
+            fun o(x: Int, y: Int) = androidx.compose.ui.geometry.Offset(x.toFloat(), y.toFloat())
+            t.down(1, o(400, 300), 0); t.up(1, o(400, 300), 80)                                   // tap → button 1
+            t.down(1, o(300, 300), 1000); t.down(2, o(500, 300), 1010); t.up(1, o(300, 300), 1080); t.up(2, o(500, 300), 1090) // → button 3
+            t.down(1, o(400, 500), 2000); for (i in 1..12) t.move(1, o(400, 500 - i * 15), 2000L + i * 16); t.up(1, o(400, 320), 2400) // drag up → button 5
+            Thread.sleep(1500)
+            rfb.close(); loop.join(1000)
+            val text = d.log.filter { it.startsWith("xev:") }.joinToString("\n")
+            val buttons = Regex("ButtonPress.*?button (\\d)", RegexOption.DOT_MATCHES_ALL).findAll(text).map { it.groupValues[1].toInt() }.toList()
+            println("X saw button presses: $buttons")
+            assertEquals(1, buttons.first())
+            assertTrue("right-click", 3 in buttons)
+            assertTrue("scroll (wheel down)", buttons.count { it == 5 } >= 2)
+        } finally { d.stop() }
+    }
 }
