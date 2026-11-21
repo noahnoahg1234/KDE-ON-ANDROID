@@ -23,7 +23,7 @@ class WindSession(
     @Volatile private var watcher: Process? = null
     val programCount get() = running.size
 
-    private val env get() = display.env + WindSystem.env(config, shared.absolutePath)
+    private val env get() = display.env + WindSystem.env(config, shared.absolutePath, WindSystem.usesBox64(sys))
 
     /** Sets up drive C: on first start (a few minutes on a phone), applies drives and settings, starts the window list. */
     fun start() {
@@ -41,7 +41,19 @@ class WindSession(
         }
         else status("Starting WindSystem…")
         val startLog = File(shared, "Logs/WindSystem.log").apply { parentFile?.mkdirs(); writeText("WindSystem start – ${java.util.Date()}\n") }
-        val rc = sys.run("${WindSystem.WINE} wineboot --init 2>&1", { l -> runCatching { startLog.appendText(l + "\n") } }, env = env)
+        val toLog: (String) -> Unit = { l -> runCatching { startLog.appendText(l + "\n") } }
+        // the Wine server first (persistent while WindSystem runs), then drive C:
+        // (detached from our output pipe: the server keeps running, and a held pipe would make this wait forever)
+        sys.run("mkdir -p ${WindSystem.PREFIX}; windsystem-wineserver -p </dev/null >/dev/null 2>&1; true", toLog, env = env)
+        var rc = sys.run("${WindSystem.WINE} wineboot --init 2>&1", toLog, env = env)
+        if (rc != 0) {
+            // once more with detailed logging, so the log says why
+            toLog("---- failed with code $rc; trying again with detailed logging")
+            sys.run("windsystem-wineserver -k 2>&1; true", toLog, env = env)
+            val verbose = env + mapOf("WINEDEBUG" to "err+all,warn+server,+process,+loaddll", "BOX64_LOG" to "1", "BOX64_SHOWSEGV" to "1")
+            sys.run("windsystem-wineserver -p </dev/null >/dev/null 2>&1; true", toLog, env = verbose)
+            rc = sys.run("${WindSystem.WINE} wineboot --init 2>&1 | tail -n 150; exit ${'$'}{PIPESTATUS[0]}", toLog, env = verbose)
+        }
         if (rc != 0) throw java.io.IOException("Wine couldn't prepare drive C: (code $rc) – see ${startLog.path}")
         applySettings()
         status(null)

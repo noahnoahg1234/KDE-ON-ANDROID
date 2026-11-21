@@ -669,6 +669,7 @@ class DebianIntegrationTest {
         // like /storage on phones: Android/WindSystem is visible inside DroidSystem under the same path
         val sys = DebianSystem(this.sys.root, this.sys.proot.copy(binds = this.sys.proot.binds + (shared.path to shared.path)), File(work, "home"), "amd64")
         System.getProperty("kdx.crashExe")?.let { File(it).copyTo(File(shared, "Programs/crashme.exe").apply { parentFile?.mkdirs() }, overwrite = true) }
+        if (System.getProperty("kdx.windFresh") != null) File(sys.root, "root/.windsystem").takeIf { it.exists() }?.deleteTree() // first start from scratch
         val d = LinuxDisplay(sys, 43, desktop = true)
         val windows = java.util.concurrent.atomic.AtomicReference<List<Pair<String, String>>>(emptyList())
         val crashes = java.util.concurrent.LinkedBlockingQueue<Pair<org.kdx.shell.droid.WindSystem.Crash, File?>>()

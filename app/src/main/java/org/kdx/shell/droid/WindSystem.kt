@@ -141,8 +141,14 @@ ${if (arch == "arm64") "$BOX64_ENV\nexec box64 /usr/lib/wine/wineserver64 \"${'$
     )
 
     /** Environment for every Windows program. */
-    fun env(c: Config, shared: String): Map<String, String> = buildMap {
+    fun env(c: Config, shared: String, box64: Boolean = false): Map<String, String> = buildMap {
         put("WINEPREFIX", PREFIX)
+        // Wine starts its server and new Wine processes itself; through these wrappers they always go through box64
+        // on ARM (instead of relying on box64 catching Wine's exec of an x86_64 program)
+        if (box64) {
+            put("WINESERVER", "/usr/local/bin/windsystem-wineserver")
+            put("WINELOADER", "/usr/local/bin/windsystem-wine")
+        }
         put("WINEARCH", "win64")
         put("WINEDEBUG", when (c.debugLog) { "off" -> "-all"; "warnings" -> "warn+all,fixme-all"; "verbose" -> "warn+all,+seh,+loaddll"; else -> "err+all,fixme-all,warn-all" })
         // no Windows-style menu entries in Linux menus / no browser integration prompts
