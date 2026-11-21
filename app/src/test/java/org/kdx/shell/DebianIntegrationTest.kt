@@ -700,4 +700,13 @@ class DebianIntegrationTest {
             s.shutdown()
         } finally { d.stop() }
     }
+
+    /** WindSystem's self-check (shown when it can't start) runs and reports Wine's version. */
+    @Test fun x_windSystemDiagnose() {
+        assumeTrue(work != null && sys.isInstalled && System.getProperty("kdx.wind") != null && org.kdx.shell.droid.WindSystem.isInstalled(sys))
+        org.kdx.shell.droid.WindSystem.ensureWrappers(sys)
+        val d = org.kdx.shell.droid.WindSystem.diagnose(sys)
+        println(d)
+        assertTrue(d.contains("Device:") && d.contains("wine-10") && d.contains("(exit 0)"))
+    }
 }

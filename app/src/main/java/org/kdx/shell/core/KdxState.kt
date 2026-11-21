@@ -540,6 +540,8 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     var windWindows by mutableStateOf<List<Pair<String, String>>>(emptyList()); internal set
     var windActive by mutableStateOf<String?>(null); internal set
     var windStatus by mutableStateOf<String?>(null); private set
+    /** Why WindSystem couldn't start (shown in its window with a self-check and the log), or null. */
+    var windError by mutableStateOf<String?>(null)
     /** Crashes waiting to be shown (program crash + its saved report). */
     val windCrashes = androidx.compose.runtime.mutableStateListOf<Pair<org.kdx.shell.droid.WindSystem.Crash, File?>>()
 
@@ -601,7 +603,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         val w = KWindow(nextId++, KApp.WINDSYSTEM, "app:$n", currentDesktop, maximized = true)
         w.title = "WindSystem"; w.fullscreen = true
         windows.add(w); activeId = w.id
-        windStatus = "Starting WindSystem…"
+        windStatus = "Starting WindSystem…"; windError = null
         val shared = windSharedDir()
         viewModelScope.launch {
             runCatching {
@@ -617,7 +619,16 @@ class KdxState(app: Application) : AndroidViewModel(app) {
                     windSession = s
                     s.start()
                 }
-            }.onFailure { e -> windStatus = null; toast("Couldn't start WindSystem: ${e.message}"); close(w) }
+            }.onFailure { e ->
+                // keep the window open and show why, with a self-check and the start log (a toast vanishes too fast)
+                windStatus = "Checking what went wrong…"
+                val details = withContext(Dispatchers.IO) {
+                    val log = runCatching { File(shared, "Logs/WindSystem.log").readLines().takeLast(30).joinToString("\n") }.getOrDefault("(no log)")
+                    "${e.message}\n\n--- Self-check\n${org.kdx.shell.droid.WindSystem.diagnose(deb)}\n\n--- Start log\n$log"
+                }
+                windStatus = null
+                windError = details
+            }
         }
     }
 

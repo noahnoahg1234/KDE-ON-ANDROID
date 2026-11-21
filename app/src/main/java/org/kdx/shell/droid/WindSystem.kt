@@ -61,6 +61,15 @@ cat > /usr/local/bin/windsystem-wineserver <<'WRAP'
 ${serverWrapper("ARCH")}WRAP
 sed -i "s/ARCH/${'$'}arch/" /usr/local/bin/windsystem-wine /usr/local/bin/windsystem-wineserver
 chmod +x /usr/local/bin/windsystem-wine /usr/local/bin/windsystem-wineserver
+echo "Checking that Wine starts on this device…"
+if ! out=${'$'}(timeout 180 /usr/local/bin/windsystem-wine --version 2>&1); then
+  echo "${'$'}out" | tail -25
+  echo
+  echo "Wine doesn't start on this device (the lines above say why). Send them to the KDX developer."
+  rm -f /usr/local/bin/windsystem-wine   # not installed until Wine works
+  exit 1
+fi
+echo "${'$'}out"
 echo
 echo "WindSystem is installed. Open it from Kickoff → WindSystem (the first start prepares drive C:)."
 """
@@ -72,13 +81,31 @@ echo "WindSystem is installed. Open it from Kickoff → WindSystem (the first st
     fun wineWrapper(arch: String) = """#!/bin/sh
 # WindSystem: runs Wine${if (arch == "arm64") " through box64" else ""}
 unset TMPDIR
-${if (arch == "arm64") "exec box64 /usr/lib/wine/wine64 \"${'$'}@\"" else "[ -x /usr/lib/wine/wine64 ] && exec /usr/lib/wine/wine64 \"${'$'}@\"\nexec wine \"${'$'}@\""}
+${if (arch == "arm64") "$BOX64_ENV\nexec box64 /usr/lib/wine/wine64 \"${'$'}@\"" else "[ -x /usr/lib/wine/wine64 ] && exec /usr/lib/wine/wine64 \"${'$'}@\"\nexec wine \"${'$'}@\""}
 """
 
     fun serverWrapper(arch: String) = """#!/bin/sh
 unset TMPDIR
-${if (arch == "arm64") "exec box64 /usr/lib/wine/wineserver64 \"${'$'}@\"" else "[ -x /usr/lib/wine/wineserver64 ] && exec /usr/lib/wine/wineserver64 \"${'$'}@\"\nexec wineserver \"${'$'}@\""}
+${if (arch == "arm64") "$BOX64_ENV\nexec box64 /usr/lib/wine/wineserver64 \"${'$'}@\"" else "[ -x /usr/lib/wine/wineserver64 ] && exec /usr/lib/wine/wineserver64 \"${'$'}@\"\nexec wineserver \"${'$'}@\""}
 """
+
+    /** Where box64 finds Debian's x86_64 libraries (multiarch folders) and Wine's own. */
+    private const val BOX64_ENV = "export BOX64_LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu/wine/x86_64-unix\nexport BOX64_PATH=/usr/lib/wine:/usr/bin"
+
+    /**
+     * A quick self-check when WindSystem can't start: device, box64, Wine files, and whether Wine runs at all
+     * (its own error output). Shown in WindSystem's window, ready to copy.
+     */
+    fun diagnose(sys: DebianSystem): String = runCatching {
+        sys.query("""
+            echo "Device: ${'$'}(uname -m), DroidSystem packages: ${'$'}(dpkg --print-architecture), memory page size: ${'$'}(getconf PAGESIZE 2>/dev/null)"
+            if command -v box64 >/dev/null 2>&1; then echo "box64: ${'$'}(box64 --version 2>&1 | head -1)"; else echo "box64: not installed"; fi
+            for f in /usr/lib/wine/wine64 /usr/lib/wine/wineserver64 /usr/local/bin/windsystem-wine; do [ -e "${'$'}f" ] && echo "found ${'$'}f" || echo "MISSING ${'$'}f"; done
+            dpkg -l 'wine64*' 'libwine*' box64 2>/dev/null | awk '/^[a-z][a-z] /{print ${'$'}1, ${'$'}2, ${'$'}3}'
+            echo "--- windsystem-wine --version:"
+            timeout 90 windsystem-wine --version 2>&1 | tail -15; echo "(exit ${'$'}?)"
+        """.trimIndent()).second.trim()
+    }.getOrElse { "Self-check failed: ${it.message}" }
 
     /** Rewrites the wrappers (so fixes reach existing installs); call before starting WindSystem. */
     fun ensureWrappers(sys: DebianSystem) {

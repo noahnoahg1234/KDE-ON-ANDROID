@@ -92,6 +92,7 @@ fun WindSystemApp(state: KdxState, w: KWindow) {
                     Text(st, color = wc.text, fontSize = 14.sp)
                 }
             }
+            state.windError?.let { err -> StartError(state, wc, err) }
             state.windCrashes.firstOrNull()?.let { (crash, report) -> CrashDialog(state, wc, crash, report) { state.windCrashes.removeAt(0) } }
             if (settings) WindSettings(state, wc) { settings = false }
         },
@@ -404,6 +405,33 @@ internal fun StartMenuPreview(wc: WindColors, programs: List<WindSystem.Program>
         programs.groupBy { it.category }.forEach { (cat, list) ->
             Text(cat, color = wc.dim, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 6.dp, top = 8.dp, bottom = 2.dp))
             list.forEach { p -> MenuRow(wc, iconFor(p), p.name, null) {} }
+        }
+    }
+}
+
+/** WindSystem couldn't start: what happened, a self-check and the log – with Copy, Retry and Repair. */
+@Composable
+private fun BoxScope.StartError(state: KdxState, wc: WindColors, details: String) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    Column(
+        Modifier.align(Alignment.Center).padding(12.dp).widthIn(max = 620.dp).fillMaxHeight(0.9f).clip(RoundedCornerShape(10.dp))
+            .background(wc.menu).border(1.dp, Color(0xFFE81123).copy(alpha = 0.6f), RoundedCornerShape(10.dp)).padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.ErrorOutline, null, tint = Color(0xFFE81123), modifier = Modifier.size(30.dp))
+            Text("  WindSystem couldn't start", color = wc.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Text("Copy the details below and send them, or try Repair (runs the installer again).", color = wc.dim, fontSize = 12.sp,
+            modifier = Modifier.padding(vertical = 6.dp))
+        Column(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color(0x22000000))
+            .verticalScroll(rememberScrollState()).padding(8.dp)) {
+            Text(details, color = wc.text, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
+            TextButton({ clipboard.setText(androidx.compose.ui.text.AnnotatedString(details)); state.toast("Copied") }) { Text("Copy details") }
+            TextButton({ state.windError = null; state.endWindSystem(); state.open(KApp.KONSOLE, "windsystem-setup") }) { Text("Repair") }
+            TextButton({ state.windError = null; state.endWindSystem(); state.launchWindSystem() }) { Text("Retry") }
+            Button({ state.windError = null; state.endWindSystem() }) { Text("Close") }
         }
     }
 }
