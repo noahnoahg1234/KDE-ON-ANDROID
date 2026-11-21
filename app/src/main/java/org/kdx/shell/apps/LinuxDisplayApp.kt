@@ -133,6 +133,7 @@ data class TouchMark(val pos: Offset, val kind: TouchTranslator.Kind, val at: Lo
 private const val M_CTRL = 1
 private const val M_ALT = 2
 private const val M_SUPER = 4
+private const val M_SHIFT = 8
 
 /**
  * Linux Display – shows an X display. With arg "app:N" it is one Linux/Flatpak app's own window: it takes the app's
@@ -229,14 +230,26 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
     // Keep the on-screen keyboard up while this Linux app window is the active one: when it becomes active, when
     // it connects, and after every tap inside the app (Android sometimes hides the keyboard on its own).
     val isActive = state.activeId == w.id
-    LaunchedEffect(isActive, s.keyboard, s.connected, s.tapCount) {
-        if (isActive && s.keyboard && s.connected) {
+    // with a hardware keyboard attached, don't push the on-screen one up (keys still go to the app)
+    val cfg = androidx.compose.ui.platform.LocalConfiguration.current
+    val hardKeyboard = cfg.keyboard == android.content.res.Configuration.KEYBOARD_QWERTY &&
+        cfg.hardKeyboardHidden == android.content.res.Configuration.HARDKEYBOARDHIDDEN_NO
+    LaunchedEffect(isActive, s.keyboard, s.connected, s.tapCount, hardKeyboard) {
+        if (isActive && s.connected) {
             delay(120)
-            runCatching { focus.requestFocus() }
-            ime?.show()
+            runCatching { focus.requestFocus() } // the hidden field also receives hardware-keyboard keys
+            if (s.keyboard && !hardKeyboard) ime?.show() else if (!s.keyboard) ime?.hide()
         }
     }
-    var typed by remember { mutableStateOf(TextFieldValue(" ")) }
+    val bridge = remember(s) {
+        ImeBridge(object : ImeBridge.Out {
+            override fun backspace(count: Int) = repeat(count) { sendKey(s, RfbClient.KEY_BACKSPACE) }
+            override fun type(text: String) = typeText(s, text)
+            override fun arrow(right: Boolean, count: Int) = repeat(count) { sendKey(s, if (right) RfbClient.KEY_RIGHT else RfbClient.KEY_LEFT) }
+        })
+    }
+    var typed by remember { mutableStateOf(bridge.value) }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val density = LocalDensity.current.density
 
     Column(Modifier.fillMaxSize().background(Color.Black)) {
@@ -271,9 +284,20 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
             contentPadding = PaddingValues(horizontal = 4.dp)) {
             val keys = listOf("Esc" to RfbClient.KEY_ESCAPE, "Tab" to RfbClient.KEY_TAB, "←" to RfbClient.KEY_LEFT, "↑" to RfbClient.KEY_UP,
                 "↓" to RfbClient.KEY_DOWN, "→" to RfbClient.KEY_RIGHT, "Enter" to RfbClient.KEY_RETURN, "⌫" to RfbClient.KEY_BACKSPACE,
-                "Del" to RfbClient.KEY_DELETE, "Home" to RfbClient.KEY_HOME, "End" to RfbClient.KEY_END)
-            items(listOf("Ctrl" to M_CTRL, "Alt" to M_ALT, "Super" to M_SUPER)) { (label, bit) ->
+                "Del" to RfbClient.KEY_DELETE, "Home" to RfbClient.KEY_HOME, "End" to RfbClient.KEY_END,
+                "PgUp" to RfbClient.KEY_PAGE_UP, "PgDn" to RfbClient.KEY_PAGE_DOWN, "Ins" to RfbClient.KEY_INSERT) +
+                (1..12).map { "F$it" to RfbClient.KEY_F1 + it - 1 }
+            // sticky modifiers: tap Ctrl, then a key (on-screen keyboard or below) = Ctrl+key
+            items(listOf("Ctrl" to M_CTRL, "Alt" to M_ALT, "Shift" to M_SHIFT, "Super" to M_SUPER)) { (label, bit) ->
                 FilterChip(s.modifiers and bit != 0, { s.modifiers = s.modifiers xor bit }, label = { Text(label, fontSize = 12.sp) })
+            }
+            // common shortcuts in one tap, and Android's clipboard typed into the app
+            items(listOf("Copy" to 'c', "Paste" to 'v', "Cut" to 'x', "Undo" to 'z', "All" to 'a')) { (label, ch) ->
+                AssistChip({ s.modifiers = s.modifiers or M_CTRL; sendKey(s, RfbClient.keysymFor(ch)) }, label = { Text(label, fontSize = 12.sp) })
+            }
+            item {
+                AssistChip({ clipboard.getText()?.text?.takeIf { it.isNotEmpty() }?.let { typeText(s, it) } },
+                    label = { Text("Paste from Android", fontSize = 12.sp) })
             }
             items(keys) { (label, sym) -> AssistChip({ sendKey(s, sym) }, label = { Text(label, fontSize = 12.sp) }) }
         }
@@ -373,19 +397,15 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
                 }
             }
             // hidden text field that collects on-screen keyboard input
-            if (s.keyboard) BasicTextField(
+            // (always there: it's also where hardware-keyboard keys arrive)
+            BasicTextField(
                 value = typed,
-                onValueChange = { v ->
-                    val old = typed.text
-                    when {
-                        v.text.length < old.length -> repeat(old.length - v.text.length) { sendKey(s, RfbClient.KEY_BACKSPACE) }
-                        v.text.startsWith(old) -> typeText(s, v.text.substring(old.length))
-                        else -> typeText(s, v.text.trim())
-                    }
-                    typed = TextFieldValue(" ", selection = androidx.compose.ui.text.TextRange(1))
-                },
+                onValueChange = { v -> typed = bridge.onChange(v) },
                 modifier = Modifier.size(1.dp).focusRequester(focus).onPreviewKeyEvent { e -> hardwareKey(s, e) },
-                keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii, imeAction = ImeAction.None),
+                // normal text keyboard (emoji, other languages, voice, swipe); no auto-replacing or capitals, which
+                // would change commands typed into terminals
+                keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Text,
+                    capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.None, imeAction = ImeAction.None),
             )
         }
     }
@@ -431,6 +451,7 @@ private fun withModifiers(s: DisplaySession, block: (RfbClient) -> Unit) {
         RfbClient.KEY_CTRL.takeIf { s.modifiers and M_CTRL != 0 },
         RfbClient.KEY_ALT.takeIf { s.modifiers and M_ALT != 0 },
         RfbClient.KEY_SUPER.takeIf { s.modifiers and M_SUPER != 0 },
+        RfbClient.KEY_SHIFT.takeIf { s.modifiers and M_SHIFT != 0 },
     )
     mods.forEach { rfb.key(it, true) }
     block(rfb)
@@ -444,31 +465,15 @@ private fun typeText(s: DisplaySession, t: String) { if (t.isNotEmpty()) withMod
 /** Hardware keyboard → X keysyms. */
 private fun hardwareKey(s: DisplaySession, e: KeyEvent): Boolean {
     val rfb = s.rfb ?: return false
-    val sym = when (e.key) {
-        Key.Enter, Key.NumPadEnter -> RfbClient.KEY_RETURN
-        Key.Backspace -> RfbClient.KEY_BACKSPACE
-        Key.Tab -> RfbClient.KEY_TAB
-        Key.Escape -> RfbClient.KEY_ESCAPE
-        Key.DirectionLeft -> RfbClient.KEY_LEFT
-        Key.DirectionRight -> RfbClient.KEY_RIGHT
-        Key.DirectionUp -> RfbClient.KEY_UP
-        Key.DirectionDown -> RfbClient.KEY_DOWN
-        Key.MoveHome -> RfbClient.KEY_HOME
-        Key.MoveEnd -> RfbClient.KEY_END
-        Key.PageUp -> RfbClient.KEY_PAGE_UP
-        Key.PageDown -> RfbClient.KEY_PAGE_DOWN
-        Key.Delete -> RfbClient.KEY_DELETE
-        Key.CtrlLeft, Key.CtrlRight -> RfbClient.KEY_CTRL
-        Key.AltLeft, Key.AltRight -> RfbClient.KEY_ALT
-        Key.ShiftLeft, Key.ShiftRight -> RfbClient.KEY_SHIFT
-        Key.MetaLeft, Key.MetaRight -> RfbClient.KEY_SUPER
-        else -> {
-            val cp = e.utf16CodePoint
-            if (cp > 0 && (e.isCtrlPressed || e.isAltPressed)) RfbClient.keysymFor(cp.toChar().lowercaseChar()) else return false
-        }
+    val ne = e.nativeKeyEvent
+    val down = when (ne.action) { android.view.KeyEvent.ACTION_DOWN -> true; android.view.KeyEvent.ACTION_UP -> false; else -> return false }
+    // non-text keys (arrows, F-keys, Enter, modifiers…) go straight to X, auto-repeat included
+    KeyMap.special(ne.keyCode)?.let { rfb.key(it, down); return true }
+    // shortcuts: Android reports no character while Ctrl is held, so use the key's plain character (AltGr stays text)
+    if (ne.isCtrlPressed || ne.metaState and android.view.KeyEvent.META_ALT_LEFT_ON != 0 || ne.isMetaPressed) {
+        KeyMap.shortcutKeysym(ne.getUnicodeChar(0))?.let { rfb.key(it, down); return true }
     }
-    rfb.key(sym, e.type == KeyEventType.KeyDown)
-    return true
+    return false // text: arrives through the text field like the on-screen keyboard's
 }
 
 /** Shown instead of silently closing when a Linux app stops right away or with an error. */

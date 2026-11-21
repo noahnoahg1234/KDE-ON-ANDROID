@@ -153,6 +153,16 @@ X apps only understand a mouse, so touches are translated (`TouchTranslator`):
 - **Feedback:** each touch shows a fading ring, since the mouse pointer is hidden.
 - **Real mouse:** a USB, Bluetooth or DeX mouse works directly, with hover, all buttons and the wheel.
 
+## Keyboard on the Linux Display
+- **On-screen keyboard:** works with composing, autocorrect, suggestions, swipe and voice typing. Every change
+  becomes the minimal edit (backspaces plus new text), and moving the cursor with the space bar sends arrow keys.
+  Emoji and any language arrive as X Unicode keysyms. Backspace works even before anything is typed.
+- **Extra keys row:** sticky Ctrl/Alt/Shift/Super, one-tap Copy/Paste/Cut/Undo/Select-all, *Paste from Android*
+  (types the Android clipboard), Esc, Tab, arrows, Home/End, PgUp/PgDn, Ins and F1–F12.
+- **Hardware keyboards:** F-keys, Insert, Print, Caps Lock and modifiers go straight to X (with auto-repeat).
+  Ctrl/Alt/Super shortcuts work, and AltGr characters (@, €…) come out right. The on-screen keyboard stays down
+  while a hardware keyboard is connected.
+
 ## Real KDE Plasma
 KDX's own shell is an Android look-alike, but DroidSystem 2 can also run the **real KDE Plasma 6** from Debian:
 KWin, plasmashell with the real panel, Kickoff and system tray, plus Dolphin, Konsole, Kate, Okular, Gwenview, Ark,

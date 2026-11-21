@@ -610,4 +610,27 @@ class DebianIntegrationTest {
             assertTrue("scroll (wheel down)", buttons.count { it == 5 } >= 2)
         } finally { d.stop() }
     }
+
+    /** Typed text (Latin, accented, emoji, Enter) and a Ctrl shortcut reach X as the right keysyms. */
+    @Test fun t_keysReachX() {
+        assumeTrue(work != null && sys.isInstalled && sys.hasCommand("usr/bin/xev"))
+        val d = LinuxDisplay(sys, 41, desktop = true)
+        try {
+            d.start(800, 600)
+            d.launch("xev -geometry 800x600+0+0 -event keyboard")
+            Thread.sleep(2500)
+            val rfb = RfbClient(port = d.port); rfb.connect()
+            val loop = Thread { runCatching { rfb.loop() } }.apply { isDaemon = true; start() }
+            rfb.pointer(400, 300, 0) // pointer over the window: it has keyboard focus
+            Thread.sleep(300)
+            rfb.type("aé😀\n")
+            rfb.key(RfbClient.KEY_CTRL, true); rfb.tapKey(org.kdx.shell.apps.KeyMap.shortcutKeysym('c'.code)!!); rfb.key(RfbClient.KEY_CTRL, false)
+            Thread.sleep(1500)
+            rfb.close(); loop.join(1000)
+            val text = d.log.filter { it.startsWith("xev:") }.joinToString("\n")
+            val pressed = Regex("KeyPress event.*?keysym (0x[0-9a-f]+), (\\w+)", RegexOption.DOT_MATCHES_ALL).findAll(text).map { it.groupValues[2] }.toList()
+            println("X saw key presses: $pressed")
+            assertEquals(listOf("a", "eacute", "U0001F600", "Return", "Control_L", "c"), pressed)
+        } finally { d.stop() }
+    }
 }

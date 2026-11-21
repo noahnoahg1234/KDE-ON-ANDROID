@@ -246,11 +246,16 @@ class RfbClient(
     fun tapKey(keysym: Int) { key(keysym, true); key(keysym, false) }
 
     /** Types text by sending each character's keysym. */
-    fun type(text: String) = text.forEach { ch ->
-        when (ch) {
-            '\n' -> tapKey(KEY_RETURN)
-            '\t' -> tapKey(KEY_TAB)
-            else -> tapKey(keysymFor(ch))
+    /** Types [text] as key presses: whole code points, so emoji and other non-Latin characters arrive intact. */
+    fun type(text: String) {
+        var i = 0
+        while (i < text.length) {
+            val cp = text.codePointAt(i); i += Character.charCount(cp)
+            when (cp) {
+                '\n'.code -> tapKey(KEY_RETURN)
+                '\t'.code -> tapKey(KEY_TAB)
+                else -> tapKey(keysymFor(cp))
+            }
         }
     }
 
@@ -287,6 +292,13 @@ class RfbClient(
         const val KEY_CTRL = 0xffe3
         const val KEY_ALT = 0xffe9
         const val KEY_SUPER = 0xffeb
-        fun keysymFor(ch: Char): Int = if (ch.code in 0x20..0x7e || ch.code in 0xa0..0xff) ch.code else 0x01000000 or ch.code
+        fun keysymFor(ch: Char): Int = keysymFor(ch.code)
+        /** Latin-1 characters are their own keysyms; everything else uses X's Unicode keysyms (0x01000000 + code point). */
+        fun keysymFor(cp: Int): Int = if (cp in 0x20..0x7e || cp in 0xa0..0xff) cp else 0x01000000 or cp
+        const val KEY_INSERT = 0xff63
+        const val KEY_MENU = 0xff67
+        const val KEY_PRINT = 0xff61
+        const val KEY_CAPS_LOCK = 0xffe5
+        const val KEY_F1 = 0xffbe // F2..F12 follow
     }
 }
