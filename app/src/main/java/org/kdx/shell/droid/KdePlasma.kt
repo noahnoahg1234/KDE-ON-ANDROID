@@ -38,6 +38,25 @@ object KdePlasma {
         "KDE_DEBUG" to "1",
     )
 
+    /** KDE background services (kded6 modules) that do nothing useful in DroidSystem; not loading them saves start-up time and memory. */
+    val KDED_OFF = listOf(
+        "baloosearchmodule", "colorcorrectlocationupdater", "device_automounter", "devicenotifications", "donationmessage",
+        "freespacenotifier", "geotimezoned", "kded_touchpad", "keyboard", "ktimezoned", "oom-notifier", "remotenotifier",
+        "soliduiserver", "audioshortcutsservice", "smbwatcher", "bluedevil", "networkmanagement", "printmanager",
+        "browserintegrationreminder", "plasma-welcome", "kded_bolt", "wacomtablet", "kscreen",
+    )
+
+    /**
+     * Programs Plasma normally starts at login that aren't needed here: the file indexer, accessibility helper,
+     * polkit agent (no polkit daemon runs), a second PulseAudio (KDX already runs one), GTK menu proxy, crash
+     * session restore and Discover's update checker. Hidden=true in KDX's config dir (searched before /etc/xdg).
+     */
+    val AUTOSTART_OFF = listOf(
+        "baloo_file", "kaccess", "polkit-kde-authentication-agent-1", "pulseaudio", "gmenudbusmenuproxy",
+        "org.kde.plasma-fallback-session-restore", "org.kde.discover.notifier", "geoclue-demo-agent", "org.kde.kgpg",
+        "kdeconnectd", "org.kde.kdeconnect.daemon", "at-spi-dbus-bus", "xdg-user-dirs", "spice-vdagent",
+    )
+
     /** Plasma's default settings for running on a phone inside DroidSystem. */
     val DEFAULTS = mapOf(
         // started by startplasma-x11 directly, not as systemd user units (there is no systemd)
@@ -51,7 +70,8 @@ object KdePlasma {
         // snappier without a GPU
         "kdeglobals" to "[KDE]\nAnimationDurationFactor=0.5\nSingleClick=true\n",
         "powerdevilrc" to "[AC][Display]\nTurnOffDisplayWhenIdle=false\nDimDisplayWhenIdle=false\n",
-        "kded6rc" to "[Module-baloosearchmodule]\nautoload=false\n",
+        // background services that only make sense on a PC (disks, Wi-Fi, location, touchpads, time zones…)
+        "kded6rc" to KDED_OFF.joinToString("") { "[Module-$it]\nautoload=false\n\n" },
     )
 
     /**
@@ -68,6 +88,8 @@ object KdePlasma {
         DEFAULTS.forEach { (name, text) -> File(dir, name).writeText(text) }
         val services = File(sys.root, "usr/local/share/dbus-1/services").apply { mkdirs() }
         DISABLED_SERVICES.forEach { File(services, "$it.service").writeText("[D-BUS Service]\nName=$it\nExec=/bin/false\n") }
+        val autostart = File(dir, "autostart").apply { mkdirs() }
+        AUTOSTART_OFF.forEach { File(autostart, "$it.desktop").writeText("[Desktop Entry]\nType=Application\nName=$it\nHidden=true\n") }
         File(sys.root, "root/.config").mkdirs()
     }
 
@@ -88,8 +110,15 @@ done
 # no systemd user manager here: don't let D-Bus pretend one can be started (Plasma would try to use it)
 f=/usr/share/dbus-1/services/org.freedesktop.systemd1.service
 dpkg-divert --local --rename --divert "${'$'}f.disabled" --add "${'$'}f" >/dev/null 2>&1 || true
-apt-get update
-apt-get install -y --no-install-recommends ${PACKAGES.joinToString(" ")} || { dpkg --configure -a; apt-get install -y -f --no-install-recommends; }
+# skip manual-page indexing (no manuals are installed, see /etc/dpkg/dpkg.cfg.d/droidsystem)
+echo "man-db man-db/auto-update boolean false" | debconf-set-selections
+# -q: no constantly redrawn progress bar (each redraw is a new line for Konsole to draw)
+apt-get -q update
+apt-get -q install -y --no-install-recommends -o Dpkg::Progress-Fancy=0 ${PACKAGES.joinToString(" ")} || { dpkg --configure -a; apt-get -q install -y -f --no-install-recommends; }
+# build KDE's application database now, so the first start doesn't have to
+echo "Preparing KDE's app database…"
+XDG_DATA_DIRS=/usr/local/share:/usr/share XDG_CONFIG_DIRS=/$DEFAULTS_DIR:/etc/xdg kbuildsycoca6 --noincremental >/dev/null 2>&1 || true
+fc-cache >/dev/null 2>&1 || true
 echo
 echo "KDE Plasma is installed. Open it from Kickoff → KDE Plasma."
 """

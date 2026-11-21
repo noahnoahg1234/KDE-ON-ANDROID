@@ -161,6 +161,10 @@ KCalc, Spectacle, System Monitor, Info Center and System Settings.
   and the desktop portal, which needs FUSE) are replaced with ones that fail at once, so Plasma doesn't wait on them.
   These are defaults in their own config folder, so changes made in Plasma's System Settings win.
 - **KDE apps on their own:** KDE apps opened from KDX's Kickoff use KDE's Qt integration, so they get Breeze too.
+- **Faster install and start:** dpkg skips translations, manuals and docs (Plasma runs in English inside
+  DroidSystem). That's about a third of Plasma's files, and installing becomes about 2× faster. KDE's app database
+  is built during install, and PC-only background services and login programs (file indexer, disk/Wi-Fi/location
+  watchers, accessibility helper, polkit agent, a second PulseAudio) are switched off.
 - **Needs:** a phone with 4 GB of RAM or more (a session uses about 800 MB).
 
 Test: `./gradlew testDebugUnitTest --tests '*DebianIntegrationTest.p_plasma' -Pkdx.integration=DIR -Pkdx.plasma=60`.

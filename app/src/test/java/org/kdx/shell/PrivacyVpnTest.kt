@@ -31,3 +31,21 @@ class PrivacyVpnTest {
         assertFalse(p.getJSONObject("DNSOverHTTPS").getBoolean("Enabled"))
     }
 }
+
+class KdePlasmaTest {
+    @Test fun setupScriptIsValidShell() {
+        val f = java.io.File.createTempFile("plasma-setup", ".sh").apply { writeText(org.kdx.shell.droid.KdePlasma.setupScript()) }
+        val p = ProcessBuilder("sh", "-n", f.path).redirectErrorStream(true).start()
+        val out = p.inputStream.bufferedReader().readText()
+        assertEquals("sh -n: $out", 0, p.waitFor())
+        val s = f.readText()
+        assertTrue(s.contains("kbuildsycoca6") && s.contains("apt-get -q install"))
+        f.delete()
+    }
+
+    @Test fun dpkgSkipsTranslationsAndDocs() {
+        val c = org.kdx.shell.droid.DebianSystem.DPKG_CONFIG
+        assertTrue(c.startsWith("force-unsafe-io\n"))
+        assertTrue(c.lines().containsAll(listOf("path-exclude=/usr/share/locale/*", "path-exclude=/usr/share/doc/*", "path-exclude=/usr/share/man/*")))
+    }
+}

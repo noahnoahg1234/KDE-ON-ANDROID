@@ -202,8 +202,19 @@ class DebianSystem(
         }
         File(root, "etc/hosts").writeText("127.0.0.1 localhost droidsystem\n::1 localhost ip6-localhost ip6-loopback\n")
         File(root, "etc/hostname").writeText("droidsystem\n")
+        writeDpkgConfig()
         // no init system / daemons under proot
         File(root, "usr/sbin/policy-rc.d").apply { writeText("#!/bin/sh\nexit 101\n"); setExecutable(true, false) }
+    }
+
+    /**
+     * dpkg settings for phones: no fsync after every file (much faster on flash storage), and no translations,
+     * manuals or documentation – DroidSystem runs in English (C.UTF-8), and under proot every file written costs
+     * time. For KDE Plasma that is about a third of all files (≈31,000 files, 430 MB).
+     */
+    private fun writeDpkgConfig() {
+        File(root, "etc/dpkg/dpkg.cfg.d").mkdirs()
+        File(root, "etc/dpkg/dpkg.cfg.d/droidsystem").writeText(DPKG_CONFIG)
     }
 
     /** Settings that make Debian behave under proot on Android, plus DroidSystem branding and tools. */
@@ -223,8 +234,7 @@ class DebianSystem(
                 "APT::Sandbox::User \"root\";\nAcquire::Retries \"3\";\nDpkg::Use-Pty \"false\";\n" +
                 "APT::Install-Recommends \"false\";\nDpkg::Options { \"--force-confold\"; };\n"
         )
-        File(root, "etc/dpkg/dpkg.cfg.d").mkdirs()
-        File(root, "etc/dpkg/dpkg.cfg.d/droidsystem").writeText("force-unsafe-io\n")
+        writeDpkgConfig()
         File(root, "etc/os-release").let { f ->
             Files.deleteIfExists(f.toPath())
             f.writeText(
@@ -322,7 +332,20 @@ class DebianSystem(
 
     companion object {
         /** Bump when applyDroidLayer changes. 2: app-window Openbox config, xdotool/dbus in display-setup. */
-        const val LAYER_VERSION = 5 // 3: bwrap stand-in, 4: sound, 5: plasma-setup
+        const val LAYER_VERSION = 6 // 3: bwrap stand-in, 4: sound, 5: plasma-setup, 6: dpkg excludes
+
+        val DPKG_CONFIG = """force-unsafe-io
+            |path-exclude=/usr/share/locale/*
+            |path-include=/usr/share/locale/locale.alias
+            |path-exclude=/usr/share/doc/*
+            |path-include=/usr/share/doc/*/copyright
+            |path-exclude=/usr/share/man/*
+            |path-exclude=/usr/share/info/*
+            |path-exclude=/usr/share/help/*
+            |path-exclude=/usr/share/gnome/help/*
+            |path-exclude=/usr/share/lintian/*
+            |path-exclude=/usr/share/linda/*
+            |""".trimMargin()
 
         /** Extracts a tar stream into [dest] preserving symlinks, hard links (as copies) and permission bits. */
         fun extractTar(input: InputStream, dest: File) {
