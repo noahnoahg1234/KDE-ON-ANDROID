@@ -648,4 +648,56 @@ class DebianIntegrationTest {
             assertEquals("X programs can connect", 0, rc)
         } finally { d.stop() }
     }
+
+    /** windsystem-setup as DroidSystem installs it (x86_64 here: Debian's Wine, 64- and 32-bit). */
+    @Test fun v_windSystemSetup() {
+        assumeTrue(work != null && sys.isInstalled && System.getProperty("kdx.wind") != null)
+        sys.applyDroidLayer()
+        if (!org.kdx.shell.droid.WindSystem.isInstalled(sys)) assertEquals(0, sys.run("windsystem-setup", ::log))
+        assertTrue(org.kdx.shell.droid.WindSystem.isInstalled(sys))
+        val (rc, out) = sys.query("windsystem-wine --version")
+        println(out); assertEquals(0, rc); assertTrue(out.contains("wine-"))
+    }
+
+    /**
+     * A WindSystem session with the real KDX code: drive C: prepared, settings applied (Windows 10), Notepad opens
+     * and shows up in the taskbar's window list, and a crashing Windows program produces a crash report.
+     */
+    @Test fun w_windSystemSession() {
+        assumeTrue(work != null && sys.isInstalled && System.getProperty("kdx.wind") != null && org.kdx.shell.droid.WindSystem.isInstalled(sys))
+        val shared = File(work, "WindSystem").apply { mkdirs() }
+        // like /storage on phones: Android/WindSystem is visible inside DroidSystem under the same path
+        val sys = DebianSystem(this.sys.root, this.sys.proot.copy(binds = this.sys.proot.binds + (shared.path to shared.path)), File(work, "home"), "amd64")
+        System.getProperty("kdx.crashExe")?.let { File(it).copyTo(File(shared, "Programs/crashme.exe").apply { parentFile?.mkdirs() }, overwrite = true) }
+        val d = LinuxDisplay(sys, 43, desktop = true)
+        val windows = java.util.concurrent.atomic.AtomicReference<List<Pair<String, String>>>(emptyList())
+        val crashes = java.util.concurrent.LinkedBlockingQueue<Pair<org.kdx.shell.droid.WindSystem.Crash, File?>>()
+        try {
+            d.start(1280, 800)
+            val s = org.kdx.shell.droid.WindSession(sys, d, shared, org.kdx.shell.droid.WindSystem.Config(), 120,
+                onCrash = { c, f -> crashes.put(c to f) }, onWindows = { l, _ -> windows.set(l) }, status = { st -> st?.let { log(it) } })
+            val t0 = System.currentTimeMillis()
+            s.start()
+            println("drive C: ready in ${(System.currentTimeMillis() - t0) / 1000} s")
+            val (rc, ver) = sys.query("WINEPREFIX=${org.kdx.shell.droid.WindSystem.PREFIX} windsystem-wine reg query 'HKCU\\Software\\Wine' /v Version 2>/dev/null")
+            println(ver); assertTrue("reports Windows 10: $ver", ver.contains("win10"))
+            assertTrue("D: is Android/WindSystem", File(sys.root, "root/.windsystem/dosdevices/d:").let { java.nio.file.Files.isSymbolicLink(it.toPath()) })
+            s.run(org.kdx.shell.droid.WindSystem.BUILTIN.first { it.name == "Notepad" })
+            var waited = 0
+            while (windows.get().none { it.second.contains("Notepad") } && waited < 60) { Thread.sleep(1000); waited++ }
+            println("taskbar windows: ${windows.get()}")
+            assertTrue("Notepad in the taskbar", windows.get().any { it.second.contains("Notepad") })
+            snapshot(d, "windsystem", 1500)
+            val progs = org.kdx.shell.droid.WindSystem.installedPrograms(sys, shared)
+            println("start menu programs: ${progs.map { it.name }}")
+            progs.firstOrNull { it.name == "crashme" }?.let { p ->
+                s.run(p)
+                val (crash, report) = crashes.poll(90, java.util.concurrent.TimeUnit.SECONDS) ?: throw AssertionError("no crash reported")
+                println("CRASH: ${crash.summary}\n" + crash.details.take(12).joinToString("\n"))
+                assertTrue(crash.summary.isNotBlank())
+                assertTrue("report saved", report?.isFile == true)
+            }
+            s.shutdown()
+        } finally { d.stop() }
+    }
 }

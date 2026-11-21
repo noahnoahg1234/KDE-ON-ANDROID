@@ -140,7 +140,15 @@ private const val M_SHIFT = 8
  * title, resizes the X screen to fit, and closes when the app exits. Without an arg it's the shared Linux desktop.
  */
 @Composable
-fun LinuxDisplayApp(state: KdxState, w: KWindow) {
+fun LinuxDisplayApp(
+    state: KdxState, w: KWindow,
+    /** false for a whole desktop on the display (WindSystem): don't follow/close with "the app". */
+    followApp: Boolean = true,
+    /** Drawn over the display (menus, dialogs). */
+    overlay: @Composable BoxScope.() -> Unit = {},
+    /** Drawn under the display (a taskbar). */
+    bottomBar: @Composable () -> Unit = {},
+) {
     val c = LocalBreeze.current
     val appNo = w.arg?.takeIf { it.startsWith("app:") }?.removePrefix("app:")?.toIntOrNull()
     val disp: LinuxDisplay? = if (appNo != null) state.appDisplay(appNo) else state.linuxDisplay
@@ -175,7 +183,7 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
         if (appNo == null && !disp.isRunning()) withContext(Dispatchers.IO) { state.awaitLinuxCleanup(); runCatching { disp.start(1280, 800) }.onFailure { s.status = it.message ?: "Display failed" } }
         s.connect(disp.port)
     }
-    if (appNo != null) {
+    if (appNo != null && followApp) {
         // The KDX window follows the app: it takes its window title, and closes when the app quits normally.
         // If the app stops right away or with an error, keep the window open and show why.
         LaunchedEffect(disp, s.crash) {
@@ -387,7 +395,7 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
                     }
                 }
             }
-            if (appNo != null && s.connected && !s.appReady) {
+            if (appNo != null && followApp && s.connected && !s.appReady) {
                 Column(Modifier.align(Alignment.Center).background(Color(0xCC232627), androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).padding(20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator()
@@ -396,6 +404,7 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
                     Text("The first start can take a minute while it sets up.", color = Color(0xFFBDC3C7), fontSize = 12.sp)
                 }
             }
+            overlay()
             // hidden text field that collects on-screen keyboard input
             // (always there: it's also where hardware-keyboard keys arrive)
             BasicTextField(
@@ -408,6 +417,7 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
                     capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.None, imeAction = ImeAction.None),
             )
         }
+        bottomBar()
     }
 }
 

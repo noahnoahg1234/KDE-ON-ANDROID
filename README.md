@@ -198,7 +198,27 @@ KCalc, Spectacle, System Monitor, Info Center and System Settings.
 Test: `./gradlew testDebugUnitTest --tests '*DebianIntegrationTest.p_plasma' -Pkdx.integration=DIR -Pkdx.plasma=60`.
 On a Linux PC whose proot is too old for Qt 6, add `-Pkdx.proot=$PWD/tools/chroot-proot.sh` (needs root).
 
-## Ad blocker
+## WindSystem (Windows programs)
+**WindSystem** (Kickoff, or KDX's Bazaar) runs Windows programs with Wine inside DroidSystem. Wine isn't Windows, and
+Windows itself isn't included: Wine provides the Windows APIs and tells programs they run on **Windows 10**
+(configurable).
+- **Install:** `windsystem-setup`, from Debian's packages. x86_64 devices get Wine with 64- and 32-bit programs.
+  ARM64 phones get box64 running Debian's x86_64 Wine (64-bit programs).
+- **Files:** drive C: is private (Wine needs symlinks). **Android/WindSystem** is drive D:, with *Programs* (put
+  installers and .exe files here; they appear in the start menu), *Documents*, *Crash reports* and *Logs*. The
+  phone's storage is E:.
+- **Desktop:** full screen, with Wine drawing Windows-style windows. The **taskbar** has a start button, search,
+  buttons for open windows (tap to switch or minimize, hold to close), a clock with the date, and show desktop.
+- **Start menu:** installed programs (from their shortcuts), the Programs folder, Wine's tools (File Explorer,
+  Command Prompt, Notepad, Task Manager, Control Panel, Registry Editor…), *Run "…"* for any command, settings, the
+  Android/WindSystem folder, and Restart or Shut down.
+- **Crash handler:** a crashed program shows what happened (Wine's exception and winedbg's backtrace), and a report
+  is saved to *Crash reports*. You can restart it there, and optionally it restarts automatically. Every program's
+  output goes to *Logs*.
+- **Settings:** Windows version, resolution, DPI, modern or classic window style, 3D or no-3D, sound, drive E:,
+  dark or light taskbar, search box, 24-hour clock and seconds, desktop colour, box64 speed presets, crash dialog
+  and auto-restart, logging level, DLL overrides, Wine tools, and resetting drive C:.
+
 **Ad Blocker** (in Kickoff) blocks ads and trackers in **every Android app** and in DroidSystem's Linux apps, without
 root. It works like Blokada/DNS66: a local VPN that only handles DNS. Android sends every app's DNS lookups to it, and
 lookups for the ~76,000 ad/tracker domains on StevenBlack's list get "no such domain". Everything else goes to a

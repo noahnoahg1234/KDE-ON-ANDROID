@@ -578,6 +578,7 @@ private fun FlathubExplore(state: KdxState, ds: DroidSystem, s: BazaarSession, f
     val local = s.items.filter { it.flatpak && it.inRepo }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
         item { OfflineBanner(s) }
+        item { WindSystemCard(state) }
         if (featured != null) item {
             Row(
                 Modifier.padding(10.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp))
@@ -860,4 +861,33 @@ private fun FlathubDetail(state: KdxState, ds: DroidSystem, s: BazaarSession, fh
             }
         },
     )
+}
+
+/** KDX's own: WindSystem (Windows programs), installed into DroidSystem. */
+@Composable
+private fun WindSystemCard(state: KdxState) {
+    val c = LocalBreeze.current
+    val deb = state.debian ?: return
+    val installed = org.kdx.shell.droid.WindSystem.isInstalled(deb)
+    Row(
+        Modifier.padding(horizontal = 10.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp))
+            .background(Brush.linearGradient(listOf(Color(0xFF0F4C81), Color(0xFF3B8EEA))))
+            .clickable { if (installed) state.launchWindSystem() else state.open(org.kdx.shell.core.KApp.KONSOLE, "windsystem-setup") }
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Air, null, tint = Color.White, modifier = Modifier.size(52.dp))
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text("MADE FOR KDX", color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text("WindSystem", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            Text("Windows programs with Wine (reports Windows 10): taskbar, start menu, search, clock, crash reports and lots of settings. Files in Android/WindSystem.",
+                color = Color.White.copy(alpha = 0.9f), fontSize = 12.sp, maxLines = 3)
+        }
+        Spacer(Modifier.width(8.dp))
+        Button({ if (installed) state.launchWindSystem() else state.open(org.kdx.shell.core.KApp.KONSOLE, "windsystem-setup") },
+            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFF0F4C81))) {
+            Text(if (installed) "Open" else "Install")
+        }
+    }
 }

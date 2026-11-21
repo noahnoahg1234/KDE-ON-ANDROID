@@ -1,6 +1,11 @@
 package org.kdx.shell
 
 import android.graphics.Bitmap
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -216,6 +221,29 @@ class ShellScreenshotTest {
         state.changePlasmaResolution(org.kdx.shell.core.PlasmaResolution.BALANCED)
         assertEquals(864 to 1872, state.plasmaGeometry(1080, 2340))
         state.changePlasmaResolution(org.kdx.shell.core.PlasmaResolution.PHONE)
+    }
+
+    @Test fun windSystemTaskbarAndMenu() {
+        state.windWindows = listOf("1" to "Untitled - Notepad", "2" to "Setup - My Program", "3" to "File Explorer")
+        state.windActive = "1"
+        rule.runOnUiThread { rule.activity.setContent {
+            org.kdx.shell.core.BreezeTheme(org.kdx.shell.core.ThemeMode.DARK, androidx.compose.ui.graphics.Color(0xFF3DAEE9)) {
+                androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color(0xFF0F4C81))) {
+                    val wc = org.kdx.shell.apps.windColors(true)
+                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.align(androidx.compose.ui.Alignment.BottomStart).padding(bottom = 52.dp, start = 6.dp)) {
+                        org.kdx.shell.apps.StartMenuPreview(wc, org.kdx.shell.droid.WindSystem.BUILTIN.take(7) +
+                            org.kdx.shell.droid.WindSystem.Program("setup", listOf("/x/setup.exe"), category = "Programs folder"))
+                    }
+                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.align(androidx.compose.ui.Alignment.BottomCenter)) {
+                        org.kdx.shell.apps.Taskbar(state, wc, true, {}, {}, androidx.compose.runtime.remember { androidx.compose.ui.focus.FocusRequester() }, "", {})
+                    }
+                }
+            }
+        } }
+        rule.mainClock.advanceTimeBy(1000)
+        shot("73-windsystem-taskbar")
+        rule.onNodeWithContentDescription("Search").assertExists() // a search button on a phone-width screen
+        rule.onNodeWithText("Untitled - Notepad").assertExists()
     }
 
     @Test fun privacyVpnPage() {

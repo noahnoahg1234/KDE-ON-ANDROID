@@ -68,7 +68,7 @@ sealed interface Launchable {
 }
 
 fun KdxState.launchables(): List<Launchable> =
-    KApp.entries.filter { !it.droidOnly || (it == KApp.PLASMA && debian != null) }.map { Launchable.Kdx(it) } + linuxApps.map { Launchable.Linux(it) } + androidApps.map { Launchable.Droid(it) }
+    KApp.entries.filter { !it.droidOnly || ((it == KApp.PLASMA || it == KApp.WINDSYSTEM) && debian != null) }.map { Launchable.Kdx(it) } + linuxApps.map { Launchable.Linux(it) } + androidApps.map { Launchable.Droid(it) }
 
 fun KdxState.resolve(key: String): Launchable? =
     if (key.startsWith("kdx:")) runCatching { Launchable.Kdx(KApp.valueOf(key.removePrefix("kdx:"))) }.getOrNull()
@@ -137,6 +137,7 @@ fun KAppIcon(app: KApp, size: Dp) {
         KApp.ADBLOCK -> Color(0xFFDA4453)
         KApp.PRIVACY -> Color(0xFF7E57C2)
         KApp.PLASMA -> Color(0xFF1D99F3)
+        KApp.WINDSYSTEM -> Color(0xFF0F6CBD)
     }
     Box(
         Modifier.size(size).clip(RoundedCornerShape(size / 4)).background(tint),

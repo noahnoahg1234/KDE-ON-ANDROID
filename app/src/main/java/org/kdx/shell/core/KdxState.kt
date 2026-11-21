@@ -53,6 +53,8 @@ enum class KApp(
     ADBLOCK("Ad Blocker", "Block ads in all apps", Icons.Filled.Block, "System", "ads adblock blocker tracker privacy dns vpn"),
     /** The real KDE Plasma 6 desktop from Debian, running in DroidSystem. */
     PLASMA("KDE Plasma", "Real KDE Plasma desktop", Icons.Filled.Dashboard, "System", "kde plasma desktop real linux kwin dolphin konsole kate"),
+    /** WindSystem: Windows programs with Wine (box64 on ARM), with a taskbar, start menu, search and clock. */
+    WINDSYSTEM("WindSystem", "Windows programs", Icons.Filled.Air, "System", "windows wine exe msi windsystem win10 programs games"),
     /** Privacy VPN: all traffic through Tor (or the user's proxy), fake GPS location. */
     PRIVACY("Privacy VPN", "Hide your IP and location", Icons.Filled.VpnLock, "System", "vpn tor privacy ip location proxy socks anonymous hide gps"),
     /** Shows the X display that DroidSystem's Linux apps (apt and Flatpak) draw on. */
@@ -60,7 +62,7 @@ enum class KApp(
     ;
 
     /** Apps that belong to DroidSystem rather than KDX itself. */
-    val droidOnly get() = this == BAZAAR || this == LINUXDISPLAY || this == PLASMA
+    val droidOnly get() = this == BAZAAR || this == LINUXDISPLAY || this == PLASMA || this == WINDSYSTEM
 
     val key get() = "kdx:$name"
 }
@@ -443,9 +445,9 @@ class KdxState(app: Application) : AndroidViewModel(app) {
      * Plasma's interface is then scaled ([plasmaScale]) so the short side is about 720 logical pixels: big enough
      * to use with fingers, small enough for Plasma's panels and menus to fit.
      */
-    fun plasmaGeometry(wPx: Int, hPx: Int): Pair<Int, Int> {
+    fun plasmaGeometry(wPx: Int, hPx: Int, res: PlasmaResolution = plasmaResolution): Pair<Int, Int> {
         val minDim = minOf(wPx, hPx).coerceAtLeast(1)
-        val xMin = maxOf(PLASMA_MIN_SIDE, minDim * plasmaResolution.pixels).coerceAtMost(minDim.toFloat())
+        val xMin = maxOf(PLASMA_MIN_SIDE, minDim * res.pixels).coerceAtMost(minDim.toFloat())
         val r = xMin / minDim
         return (wPx * r).toInt().coerceIn(320, 4096) to (hPx * r).toInt().coerceIn(240, 4096)
     }
@@ -530,6 +532,101 @@ class KdxState(app: Application) : AndroidViewModel(app) {
             // from anywhere else (a terminal, an app window): a KDX window of its own
             viewModelScope.launch { launchFlatpak(r.id) }; null
         }
+    }
+
+    // ---- WindSystem (Windows programs, see droid/WindSystem.kt) ----
+    var windConfig by mutableStateOf(loadWindConfig()); private set
+    @Volatile var windSession: org.kdx.shell.droid.WindSession? = null; private set
+    var windWindows by mutableStateOf<List<Pair<String, String>>>(emptyList()); internal set
+    var windActive by mutableStateOf<String?>(null); internal set
+    var windStatus by mutableStateOf<String?>(null); private set
+    /** Crashes waiting to be shown (program crash + its saved report). */
+    val windCrashes = androidx.compose.runtime.mutableStateListOf<Pair<org.kdx.shell.droid.WindSystem.Crash, File?>>()
+
+    private fun loadWindConfig(): org.kdx.shell.droid.WindSystem.Config {
+        val d = org.kdx.shell.droid.WindSystem.Config()
+        val p = prefs
+        return org.kdx.shell.droid.WindSystem.Config(
+            windowsVersion = p.getString("wind.version", d.windowsVersion)!!, dpi = p.getInt("wind.dpi", 0),
+            renderer = p.getString("wind.renderer", d.renderer)!!, sound = p.getBoolean("wind.sound", d.sound),
+            phoneDriveE = p.getBoolean("wind.driveE", d.phoneDriveE), darkTaskbar = p.getBoolean("wind.dark", d.darkTaskbar),
+            clock24h = p.getBoolean("wind.clock24", d.clock24h), clockSeconds = p.getBoolean("wind.clockSec", d.clockSeconds),
+            showSearch = p.getBoolean("wind.search", d.showSearch), wallpaper = p.getLong("wind.wallpaper", d.wallpaper),
+            performance = p.getString("wind.perf", d.performance)!!, crashDialog = p.getBoolean("wind.crashDialog", d.crashDialog),
+            autoRestart = p.getBoolean("wind.autoRestart", d.autoRestart), debugLog = p.getString("wind.debug", d.debugLog)!!,
+            dllOverrides = p.getString("wind.dlls", d.dllOverrides)!!, resolution = p.getString("wind.res", d.resolution)!!,
+            modernTheme = p.getBoolean("wind.modern", d.modernTheme),
+        )
+    }
+
+    /** Saves WindSystem's settings; applies them to a running WindSystem (registry, drives, wallpaper). */
+    fun changeWindConfig(c: org.kdx.shell.droid.WindSystem.Config) {
+        windConfig = c
+        prefs.edit().putString("wind.version", c.windowsVersion).putInt("wind.dpi", c.dpi).putString("wind.renderer", c.renderer)
+            .putBoolean("wind.sound", c.sound).putBoolean("wind.driveE", c.phoneDriveE).putBoolean("wind.dark", c.darkTaskbar)
+            .putBoolean("wind.clock24", c.clock24h).putBoolean("wind.clockSec", c.clockSeconds).putBoolean("wind.search", c.showSearch)
+            .putLong("wind.wallpaper", c.wallpaper).putString("wind.perf", c.performance).putBoolean("wind.crashDialog", c.crashDialog)
+            .putBoolean("wind.autoRestart", c.autoRestart).putString("wind.debug", c.debugLog).putString("wind.dlls", c.dllOverrides)
+            .putString("wind.res", c.resolution).putBoolean("wind.modern", c.modernTheme).apply()
+        windSession?.let { s -> s.config = c; viewModelScope.launch(Dispatchers.IO) { runCatching { s.applySettings() } } }
+    }
+
+    /** Android/WindSystem: the phone's Android folder when KDX has file access, else KDX's folder there. */
+    fun windSharedDir(): File {
+        val candidates = listOfNotNull(
+            runCatching { File(Environment.getExternalStorageDirectory(), "Android/WindSystem") }.getOrNull()?.takeIf { hasStorageAccess() },
+            ctx.getExternalFilesDir(null)?.let { File(it, "WindSystem") },
+        )
+        return candidates.firstOrNull { writable(it) } ?: File(ctx.filesDir, "WindSystem")
+    }
+
+    /** Opens WindSystem full screen (installing it first if needed); a second call brings it back. */
+    fun launchWindSystem() {
+        val deb = debian ?: run { toast("Turn on the Linux system (DroidSystem 2) in System Settings first"); return }
+        windows.firstOrNull { it.app == KApp.WINDSYSTEM }?.let { it.minimized = false; it.desktop = currentDesktop; focus(it); return }
+        if (!displaySetUp(deb)) return
+        if (!org.kdx.shell.droid.WindSystem.isInstalled(deb)) {
+            toast("Installing WindSystem first…")
+            open(KApp.KONSOLE, "windsystem-setup"); return
+        }
+        val n = (2..63).first { !appDisplays.containsKey(it) && !File(deb.root, "tmp/.X$it-lock").exists() }
+        val disp = org.kdx.shell.droid.LinuxDisplay(deb, n, desktop = true)
+        appDisplays[n] = disp
+        org.kdx.shell.droid.LinuxAppsService.update(ctx, appDisplays.size)
+        val dm = ctx.resources.displayMetrics
+        val res = when (windConfig.resolution) { "fast" -> PlasmaResolution.FAST; "balanced" -> PlasmaResolution.BALANCED; else -> PlasmaResolution.PHONE }
+        val (xw, xh) = plasmaGeometry(dm.widthPixels, dm.heightPixels, res)
+        val autoDpi = ((96 * plasmaScale(minOf(xw, xh))) / 24).toInt().coerceAtLeast(4) * 24
+        closeMenus()
+        val w = KWindow(nextId++, KApp.WINDSYSTEM, "app:$n", currentDesktop, maximized = true)
+        w.title = "WindSystem"; w.fullscreen = true
+        windows.add(w); activeId = w.id
+        windStatus = "Starting WindSystem…"
+        val shared = windSharedDir()
+        viewModelScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    awaitLinuxCleanup()
+                    ensureSound()
+                    disp.start(xw, xh)
+                    if (!disp.waitForX()) throw java.io.IOException("the display server didn't come up")
+                    val s = org.kdx.shell.droid.WindSession(deb, disp, shared, windConfig, autoDpi,
+                        onCrash = { c, f -> viewModelScope.launch { windCrashes += c to f } },
+                        onWindows = { list, active -> viewModelScope.launch { windWindows = list; windActive = active } },
+                        status = { st -> viewModelScope.launch { windStatus = st } })
+                    windSession = s
+                    s.start()
+                }
+            }.onFailure { e -> windStatus = null; toast("Couldn't start WindSystem: ${e.message}"); close(w) }
+        }
+    }
+
+    /** Ends WindSystem (all Windows programs) and closes its window. */
+    fun endWindSystem() {
+        val s = windSession; windSession = null
+        windWindows = emptyList(); windStatus = null
+        viewModelScope.launch(Dispatchers.IO) { runCatching { s?.shutdown() } }
+        windows.filter { it.app == KApp.WINDSYSTEM }.forEach { close(it) }
     }
 
     /** Runs an installed Flatpak app in its own window, with its name and icon. */
@@ -716,6 +813,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         // Single-instance apps are focused instead of duplicated.
         if (app.droidOnly && droid == null) { toast("Enable the Linux system (DroidSystem) in System Settings to use ${app.title}"); return }
         if (app == KApp.PLASMA) { launchPlasma(); return }
+        if (app == KApp.WINDSYSTEM) { launchWindSystem(); return }
         if (app in setOf(KApp.SETTINGS, KApp.KLIPPER, KApp.SYSMON, KApp.INFOCENTER, KApp.KNOTES, KApp.BAZAAR, KApp.LINUXDISPLAY, KApp.ADBLOCK, KApp.PRIVACY)) {
             windows.firstOrNull { it.app == app }?.let {
                 it.desktop = currentDesktop
@@ -741,6 +839,10 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     }
 
     fun close(w: KWindow) {
+        if (w.app == KApp.WINDSYSTEM) {
+            val ws = windSession; windSession = null; windWindows = emptyList(); windStatus = null
+            if (ws != null) viewModelScope.launch(Dispatchers.IO) { runCatching { ws.shutdown() } }
+        }
         w.dispose()
         windows.remove(w)
         if (activeId == w.id) activeId = windows.lastOrNull { !it.minimized && it.desktop == currentDesktop }?.id
