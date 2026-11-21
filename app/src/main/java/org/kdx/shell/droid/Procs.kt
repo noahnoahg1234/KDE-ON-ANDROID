@@ -39,6 +39,19 @@ object Procs {
         killEnv(entry)
     }
 
+    /** When [pid] started, in clock ticks since boot (field 22 of /proc/PID/stat), or null. */
+    fun startTicks(pid: Int): Long? = read(File("/proc/$pid/stat")).substringAfterLast(')').trim().split(' ')
+        .getOrNull(19)?.toLongOrNull() // field 22, counted from field 3 (after "pid (comm)")
+
+    /**
+     * Kills processes carrying [entry] that started *before* this KDX process: leftovers of an earlier KDX session.
+     * Programs KDX starts meanwhile (a display server, KDE Plasma…) are newer and left alone.
+     */
+    fun killOrphans(entry: String) {
+        val me = startTicks(self) ?: return
+        repeat(2) { kill(withEnv(entry).filter { pid -> startTicks(pid)?.let { it < me } ?: false }); Thread.sleep(150) }
+    }
+
     /** Kills every process carrying [entry] in its environment; repeats once to catch children forked meanwhile. */
     fun killEnv(entry: String) {
         repeat(2) { kill(withEnv(entry)); Thread.sleep(150) }

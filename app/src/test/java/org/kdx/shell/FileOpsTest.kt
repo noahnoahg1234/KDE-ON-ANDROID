@@ -29,3 +29,21 @@ class FileOpsTest {
         assertTrue(f.deleteTree()); assertFalse(f.exists())
     }
 }
+
+class ProcsTest {
+    @Test fun orphanCleanupSparesProgramsStartedAfterKdx() {
+        val marker = "KDX_PROCS_TEST=" + System.nanoTime()
+        val p = ProcessBuilder("sleep", "30").apply { environment()[marker.substringBefore('=')] = marker.substringAfter('=') }.start()
+        try {
+            Thread.sleep(200)
+            val pid = org.kdx.shell.droid.Procs.withEnv(marker).single()
+            assertNotNull(org.kdx.shell.droid.Procs.startTicks(pid))
+            org.kdx.shell.droid.Procs.killOrphans(marker)
+            Thread.sleep(200)
+            assertTrue("started after this process: not an orphan", p.isAlive)
+            org.kdx.shell.droid.Procs.killEnv(marker)
+            Thread.sleep(200)
+            assertFalse(p.isAlive)
+        } finally { p.destroyForcibly() }
+    }
+}

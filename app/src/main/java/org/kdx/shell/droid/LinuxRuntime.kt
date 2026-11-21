@@ -134,6 +134,18 @@ class LinuxDisplay(
         }
     }
 
+    /** Waits until the X server accepts connections on its socket (what X programs connect to). */
+    fun waitForX(timeoutMs: Long = 10_000): Boolean {
+        val sock = File(sys.root, "tmp/.X11-unix/X$display")
+        val end = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < end) {
+            if (server?.isAlive != true) return false
+            if (sock.exists() && portOpen()) return true
+            Thread.sleep(100)
+        }
+        return false
+    }
+
     /** True while any program other than the X server and window manager runs on this display. */
     @Volatile var appProcess: Process? = null
         set(v) { field = v; appStartedAt = System.currentTimeMillis() }

@@ -172,7 +172,7 @@ fun LinuxDisplayApp(state: KdxState, w: KWindow) {
     }
     val appName = remember(w) { w.title }
     LaunchedEffect(disp) {
-        if (appNo == null && !disp.isRunning()) withContext(Dispatchers.IO) { runCatching { disp.start(1280, 800) }.onFailure { s.status = it.message ?: "Display failed" } }
+        if (appNo == null && !disp.isRunning()) withContext(Dispatchers.IO) { state.awaitLinuxCleanup(); runCatching { disp.start(1280, 800) }.onFailure { s.status = it.message ?: "Display failed" } }
         s.connect(disp.port)
     }
     if (appNo != null) {

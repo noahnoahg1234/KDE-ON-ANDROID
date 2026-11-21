@@ -633,4 +633,19 @@ class DebianIntegrationTest {
             assertEquals(listOf("a", "eacute", "U0001F600", "Return", "Control_L", "c"), pressed)
         } finally { d.stop() }
     }
+
+    /** KDX's start-up cleanup of leftover Linux programs must not kill a display server KDX just started. */
+    @Test fun u_cleanupSparesNewDisplay() {
+        assumeTrue(work != null && sys.isInstalled && sys.hasCommand("usr/bin/Xvnc"))
+        val d = LinuxDisplay(sys, 42, desktop = true)
+        try {
+            d.start(800, 600)
+            org.kdx.shell.droid.Procs.killOrphans("HOSTNAME=droidsystem") // what KDX runs when DroidSystem attaches
+            Thread.sleep(500)
+            assertTrue("display server survived the cleanup", d.waitForX(3000))
+            val (rc, out) = sys.query("DISPLAY=:42 xdpyinfo | head -3")
+            println(out)
+            assertEquals("X programs can connect", 0, rc)
+        } finally { d.stop() }
+    }
 }

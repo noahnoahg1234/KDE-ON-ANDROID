@@ -210,6 +210,10 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         org.kdx.shell.droid.AndroidLinux.debian(ctx, classic?.home)
 
     private var orphansCleaned = false
+    @Volatile private var orphanCleanup: kotlinx.coroutines.Job? = null
+
+    /** Waits until leftovers of an earlier KDX session are cleaned up (call before starting Linux programs). */
+    suspend fun awaitLinuxCleanup() { orphanCleanup?.join() }
 
     /** Points DroidSystem's Linux apps at the ad blocker's DNS while it runs (they don't use Android's resolver). */
     fun syncLinuxDns() {
@@ -237,7 +241,9 @@ class KdxState(app: Application) : AndroidViewModel(app) {
             orphansCleaned = true
             // Linux programs left running by an earlier KDX session (their windows are gone). On Android every
             // process with KDX's user ID is KDX's own, and all DroidSystem programs carry HOSTNAME=droidsystem.
-            viewModelScope.launch(Dispatchers.IO) { runCatching { org.kdx.shell.droid.Procs.killEnv("HOSTNAME=droidsystem") } }
+            // Only processes older than this KDX process, and anything that starts Linux programs waits for this
+            // first (it used to kill a display server started at the same moment: "cannot connect to X server").
+            orphanCleanup = viewModelScope.launch(Dispatchers.IO) { runCatching { org.kdx.shell.droid.Procs.killOrphans("HOSTNAME=droidsystem") } }
         }
         if (d != null) {
             if (linuxDisplay?.sys?.root != d.root) {
@@ -336,6 +342,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
+                    awaitLinuxCleanup()
                     ensureSound() // before the app starts, so it finds the sound server
                     disp.start((wDp * f).toInt(), (hDp * f).toInt())
                     disp.logFile = newLogFile(title)
@@ -410,6 +417,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
                 val dp = droidProgress; val bp = debianProgress
                 when {
                     dp != null -> realKdeStep = "Installing the Linux system: ${dp.second}"
+                    droid == null && droidEnabled && !droidRequested -> realKdeStep = "Starting the Linux system…" // still loading
                     droid == null -> {
                         if (droidRequested) { realKdeStep = "Couldn't turn on the Linux system. Try again below."; return@launch }
                         droidRequested = true; realKdeStep = "Turning on the Linux system…"; enableDroid()
@@ -479,10 +487,13 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
+                    awaitLinuxCleanup()
                     ensureSound()
                     org.kdx.shell.droid.KdePlasma.writeDefaults(deb)
                     runCatching { org.kdx.shell.droid.LinuxLauncher.installWrapper(deb) } // Flatpak apps from Plasma's menu
                     disp.start(xw, xh)
+                    // Plasma's first step is connecting to X: make sure the X server's socket is really there
+                    if (!disp.waitForX()) throw java.io.IOException("the display server didn't come up:\n" + disp.log.toList().takeLast(6).joinToString("\n"))
                     disp.logFile = newLogFile("KDE Plasma")
                     val start = { disp.launch(org.kdx.shell.droid.KdePlasma.COMMAND, org.kdx.shell.droid.KdePlasma.env + scaleEnv) }
                     disp.relaunch = { disp.logFile = newLogFile("KDE Plasma"); start() }
