@@ -45,20 +45,24 @@ class WindSession(
         // the Wine server first (persistent while WindSystem runs), then drive C:
         // (detached from our output pipe: the server keeps running, and a held pipe would make this wait forever)
         sys.run("mkdir -p ${WindSystem.PREFIX}; windsystem-wineserver -p </dev/null >/dev/null 2>&1; true", toLog, env = env)
-        var rc = sys.run("${WindSystem.WINE} wineboot --init 2>&1", toLog, env = env)
+        // Output goes to a file, not our pipe: Wine's background services (services.exe, plugplay…) keep running
+        // after wineboot and would hold the pipe open – waiting for it to close would wait forever.
+        var rc = sys.run(BOOT, toLog, env = env)
         if (rc != 0) {
             // once more with detailed logging, so the log says why
             toLog("---- failed with code $rc; trying again with detailed logging")
             sys.run("windsystem-wineserver -k 2>&1; true", toLog, env = env)
             val verbose = env + mapOf("WINEDEBUG" to "err+all,warn+server,+process,+loaddll", "BOX64_LOG" to "1", "BOX64_SHOWSEGV" to "1")
             sys.run("windsystem-wineserver -p </dev/null >/dev/null 2>&1; true", toLog, env = verbose)
-            rc = sys.run("${WindSystem.WINE} wineboot --init 2>&1 | tail -n 150; exit ${'$'}{PIPESTATUS[0]}", toLog, env = verbose)
+            rc = sys.run(BOOT.replace("cat ", "tail -n 150 "), toLog, env = verbose)
         }
         if (rc != 0) throw java.io.IOException("Wine couldn't prepare drive C: (code $rc) – see ${startLog.path}")
         applySettings()
         status(null)
         startWatcher()
     }
+
+    private val BOOT = "${WindSystem.WINE} wineboot --init </dev/null >/tmp/windsystem-boot.log 2>&1; rc=${'$'}?; cat /tmp/windsystem-boot.log; exit ${'$'}rc"
 
     /** Writes [config] into the registry and drive letters (one regedit run). */
     fun applySettings() {
@@ -79,18 +83,23 @@ class WindSession(
         proc.outputStream.close()
         running[proc] = p.name
         val log = File(shared, "Logs").apply { mkdirs() }.resolve(p.name.replace(Regex("[^A-Za-z0-9._-]+"), "_") + ".log")
+        val lines = java.util.concurrent.ConcurrentLinkedDeque<String>()
+        // output → log file (helper processes the program started may keep this going after it exits)
         Thread({
-            val lines = ArrayDeque<String>()
             runCatching {
                 log.printWriter().use { w ->
                     w.println("WindSystem – ${p.name} – ${java.util.Date()}")
                     proc.inputStream.bufferedReader().forEachLine { l ->
                         w.println(l); w.flush()
-                        lines.addLast(l); while (lines.size > 400) lines.removeFirst()
+                        lines.addLast(l); while (lines.size > 400) lines.pollFirst()
                     }
                 }
             }
+        }, "windsystem-log-${p.name}").apply { isDaemon = true; start() }
+        // the program's own exit: report a crash right away
+        Thread({
             val code = runCatching { proc.waitFor() }.getOrDefault(-1)
+            Thread.sleep(800) // let the last lines (winedbg's backtrace) arrive
             running.remove(proc)
             val crash = WindSystem.parseCrash(p.name, code, lines.toList()) ?: return@Thread
             val report = runCatching {

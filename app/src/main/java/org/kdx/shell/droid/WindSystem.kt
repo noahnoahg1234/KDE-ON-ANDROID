@@ -44,6 +44,10 @@ case "${'$'}arch" in
     apt-get -q update
     apt-get -q install -y --no-install-recommends -o Dpkg::Progress-Fancy=0 wine wine64 wine32:i386 libwine libwine:i386 fonts-wine \
       winbind xdotool x11-utils openbox fonts-liberation2
+    cat > /usr/local/bin/windsystem-wine <<'WRAP'
+${wineWrapper("amd64")}WRAP
+    cat > /usr/local/bin/windsystem-wineserver <<'WRAP'
+${serverWrapper("amd64")}WRAP
     ;;
   arm64)
     # Windows programs are x86: box64 translates x86_64 code to ARM; Wine and its libraries are Debian's amd64 packages
@@ -51,15 +55,24 @@ case "${'$'}arch" in
     apt-get -q update
     apt-get -q install -y --no-install-recommends -o Dpkg::Progress-Fancy=0 box64 xdotool x11-utils openbox fonts-liberation2
     apt-get -q install -y --no-install-recommends -o Dpkg::Progress-Fancy=0 wine64:amd64 libwine:amd64 fonts-wine
+    # Wine starts its server through Debian's /usr/lib/wine/wineserver *shell script*, which runs wineserver64 directly –
+    # an x86_64 program the phone can't run, and box64 can't step in from a script. So wineserver64 itself becomes a
+    # small script that runs the real one (diverted, so upgrades keep working) through box64.
+    if ! grep -q "$SERVER_MARKER" /usr/lib/wine/wineserver64 2>/dev/null; then
+      dpkg-divert --local --rename --divert /usr/lib/wine/wineserver64.x86 --add /usr/lib/wine/wineserver64
+      cat > /usr/lib/wine/wineserver64 <<'WRAP'
+$SERVER_BOX64_SCRIPT
+WRAP
+      chmod +x /usr/lib/wine/wineserver64
+    fi
+    cat > /usr/local/bin/windsystem-wine <<'WRAP'
+${wineWrapper("arm64")}WRAP
+    cat > /usr/local/bin/windsystem-wineserver <<'WRAP'
+${serverWrapper("arm64")}WRAP
     ;;
   *)
     echo "WindSystem needs an x86_64 or ARM64 device (this one is ${'$'}arch)."; exit 1 ;;
 esac
-cat > /usr/local/bin/windsystem-wine <<'WRAP'
-${wineWrapper("ARCH")}WRAP
-cat > /usr/local/bin/windsystem-wineserver <<'WRAP'
-${serverWrapper("ARCH")}WRAP
-sed -i "s/ARCH/${'$'}arch/" /usr/local/bin/windsystem-wine /usr/local/bin/windsystem-wineserver
 chmod +x /usr/local/bin/windsystem-wine /usr/local/bin/windsystem-wineserver
 echo "Checking that Wine starts on this device…"
 if ! out=${'$'}(timeout 180 /usr/local/bin/windsystem-wine --version 2>&1); then
@@ -86,7 +99,16 @@ ${if (arch == "arm64") "$BOX64_ENV\nexec box64 /usr/lib/wine/wine64 \"${'$'}@\""
 
     fun serverWrapper(arch: String) = """#!/bin/sh
 unset TMPDIR
-${if (arch == "arm64") "$BOX64_ENV\nexec box64 /usr/lib/wine/wineserver64 \"${'$'}@\"" else "[ -x /usr/lib/wine/wineserver64 ] && exec /usr/lib/wine/wineserver64 \"${'$'}@\"\nexec wineserver \"${'$'}@\""}
+${if (arch == "arm64") "$BOX64_ENV\nexec /usr/lib/wine/wineserver64 \"${'$'}@\"" else "[ -x /usr/lib/wine/wineserver64 ] && exec /usr/lib/wine/wineserver64 \"${'$'}@\"\nexec wineserver \"${'$'}@\""}
+"""
+
+    private const val SERVER_MARKER = "WindSystem: the x86_64 Wine server, through box64"
+
+    /** /usr/lib/wine/wineserver64 on ARM: the real (diverted) x86_64 server, through box64. */
+    val SERVER_BOX64_SCRIPT = """#!/bin/sh
+# $SERVER_MARKER
+export BOX64_LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu
+exec box64 /usr/lib/wine/wineserver64.x86 "${'$'}@"
 """
 
     /** Where box64 finds Debian's x86_64 libraries (multiarch folders) and Wine's own. */
@@ -100,6 +122,7 @@ ${if (arch == "arm64") "$BOX64_ENV\nexec box64 /usr/lib/wine/wineserver64 \"${'$
         sys.query("""
             echo "Device: ${'$'}(uname -m), DroidSystem packages: ${'$'}(dpkg --print-architecture), memory page size: ${'$'}(getconf PAGESIZE 2>/dev/null)"
             if command -v box64 >/dev/null 2>&1; then echo "box64: ${'$'}(box64 --version 2>&1 | head -1)"; else echo "box64: not installed"; fi
+            grep -q "$SERVER_MARKER" /usr/lib/wine/wineserver64 2>/dev/null && echo "wineserver64: runs through box64" || echo "wineserver64: original"
             for f in /usr/lib/wine/wine64 /usr/lib/wine/wineserver64 /usr/local/bin/windsystem-wine; do [ -e "${'$'}f" ] && echo "found ${'$'}f" || echo "MISSING ${'$'}f"; done
             dpkg -l 'wine64*' 'libwine*' box64 2>/dev/null | awk '/^[a-z][a-z] /{print ${'$'}1, ${'$'}2, ${'$'}3}'
             echo "--- windsystem-wine --version:"
@@ -110,6 +133,13 @@ ${if (arch == "arm64") "$BOX64_ENV\nexec box64 /usr/lib/wine/wineserver64 \"${'$
     /** Rewrites the wrappers (so fixes reach existing installs); call before starting WindSystem. */
     fun ensureWrappers(sys: DebianSystem) {
         if (!isInstalled(sys)) return
+        // ARM installs from before this fix: put the box64 wineserver64 in place (see setupScript)
+        if (sys.arch == "arm64" && runCatching { File(sys.root, "usr/lib/wine/wineserver64").readText().contains(SERVER_MARKER) }.getOrDefault(false).not()) {
+            sys.run("[ -e /usr/lib/wine/wineserver64.x86 ] || dpkg-divert --local --rename --divert /usr/lib/wine/wineserver64.x86 --add /usr/lib/wine/wineserver64")
+            if (File(sys.root, "usr/lib/wine/wineserver64.x86").exists()) {
+                File(sys.root, "usr/lib/wine/wineserver64").apply { java.nio.file.Files.deleteIfExists(toPath()); writeText(SERVER_BOX64_SCRIPT); setExecutable(true, false) }
+            }
+        }
         listOf("windsystem-wine" to wineWrapper(sys.arch), "windsystem-wineserver" to serverWrapper(sys.arch)).forEach { (n, body) ->
             val f = File(sys.root, "usr/local/bin/$n")
             if (runCatching { f.readText() }.getOrNull() != body) { f.writeText(body); f.setExecutable(true, false) }

@@ -22,8 +22,10 @@ import java.io.File
 @FixMethodOrder(MethodSorters.NAME_ASCENDING)
 class DebianIntegrationTest {
     private val work = System.getProperty("kdx.integration")?.let { File(it) }
+    /** -Pkdx.arch=arm64 builds an ARM64 DroidSystem (runs through qemu-user binfmt on an x86 machine). */
+    private val arch = System.getProperty("kdx.arch") ?: "amd64"
     private val sys by lazy {
-        DebianSystem(File(work, "rootfs"), ProotConfig(System.getProperty("kdx.proot") ?: "/usr/bin/proot"), File(work, "home"), "amd64",
+        DebianSystem(File(work, "rootfs"), ProotConfig(System.getProperty("kdx.proot") ?: "/usr/bin/proot"), File(work, "home"), arch,
             mirror = "https://deb.debian.org/debian", securityMirror = "https://deb.debian.org/debian-security").apply {
             // test machines that only reach the internet through an HTTPS proxy (phones connect directly)
             System.getenv("KDX_TEST_PROXY")?.let { p -> extraEnv = mapOf("https_proxy" to p, "http_proxy" to p, "no_proxy" to "localhost,127.0.0.1") }
@@ -35,7 +37,7 @@ class DebianIntegrationTest {
         assumeTrue(work != null)
         if (sys.isInstalled) return
         var last = ""
-        sys.bootstrap(DebianRepo(mirror = "https://deb.debian.org/debian", arch = "amd64"), File(work, "cache"), { p, m -> if (m != last) { println("[%3.0f%%] %s".format(p * 100, m)); last = m } }, ::log)
+        sys.bootstrap(DebianRepo(mirror = "https://deb.debian.org/debian", arch = arch), File(work, "cache"), { p, m -> if (m != last) { println("[%3.0f%%] %s".format(p * 100, m)); last = m } }, ::log)
         assertTrue(sys.isInstalled)
         trustTestProxy()
     }
@@ -667,7 +669,7 @@ class DebianIntegrationTest {
         assumeTrue(work != null && sys.isInstalled && System.getProperty("kdx.wind") != null && org.kdx.shell.droid.WindSystem.isInstalled(sys))
         val shared = File(work, "WindSystem").apply { mkdirs() }
         // like /storage on phones: Android/WindSystem is visible inside DroidSystem under the same path
-        val sys = DebianSystem(this.sys.root, this.sys.proot.copy(binds = this.sys.proot.binds + (shared.path to shared.path)), File(work, "home"), "amd64")
+        val sys = DebianSystem(this.sys.root, this.sys.proot.copy(binds = this.sys.proot.binds + (shared.path to shared.path)), File(work, "home"), arch)
         System.getProperty("kdx.crashExe")?.let { File(it).copyTo(File(shared, "Programs/crashme.exe").apply { parentFile?.mkdirs() }, overwrite = true) }
         if (System.getProperty("kdx.windFresh") != null) File(sys.root, "root/.windsystem").takeIf { it.exists() }?.deleteTree() // first start from scratch
         val d = LinuxDisplay(sys, 43, desktop = true)
@@ -685,7 +687,7 @@ class DebianIntegrationTest {
             assertTrue("D: is Android/WindSystem", File(sys.root, "root/.windsystem/dosdevices/d:").let { java.nio.file.Files.isSymbolicLink(it.toPath()) })
             s.run(org.kdx.shell.droid.WindSystem.BUILTIN.first { it.name == "Notepad" })
             var waited = 0
-            while (windows.get().none { it.second.contains("Notepad") } && waited < 60) { Thread.sleep(1000); waited++ }
+            while (windows.get().none { it.second.contains("Notepad") } && waited < (if (arch == "arm64") 900 else 60)) { Thread.sleep(1000); waited++ }
             println("taskbar windows: ${windows.get()}")
             assertTrue("Notepad in the taskbar", windows.get().any { it.second.contains("Notepad") })
             snapshot(d, "windsystem", 1500)
@@ -693,7 +695,7 @@ class DebianIntegrationTest {
             println("start menu programs: ${progs.map { it.name }}")
             progs.firstOrNull { it.name == "crashme" }?.let { p ->
                 s.run(p)
-                val (crash, report) = crashes.poll(90, java.util.concurrent.TimeUnit.SECONDS) ?: throw AssertionError("no crash reported")
+                val (crash, report) = crashes.poll(if (arch == "arm64") 900L else 90L, java.util.concurrent.TimeUnit.SECONDS) ?: throw AssertionError("no crash reported")
                 println("CRASH: ${crash.summary}\n" + crash.details.take(12).joinToString("\n"))
                 assertTrue(crash.summary.isNotBlank())
                 assertTrue("report saved", report?.isFile == true)

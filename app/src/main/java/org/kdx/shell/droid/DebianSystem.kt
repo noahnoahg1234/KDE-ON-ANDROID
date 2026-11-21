@@ -268,7 +268,7 @@ class DebianSystem(
             |# Installs the X display server used by KDX's Linux Display window.
             |set -e
             |apt-get update
-            |apt-get install -y tigervnc-standalone-server openbox dbus dbus-x11 x11-xserver-utils x11-utils xdotool fonts-dejavu-core adwaita-icon-theme \\
+            |apt-get install -y tigervnc-standalone-server openbox dbus dbus-x11 x11-xserver-utils x11-utils xdotool fonts-dejavu-core adwaita-icon-theme \
             |  pulseaudio pulseaudio-utils libasound2-plugins
             |echo "Display server ready. Linux apps with windows now open in KDX's Linux Display."
             |""".trimMargin())
@@ -335,7 +335,7 @@ class DebianSystem(
 
     companion object {
         /** Bump when applyDroidLayer changes. 2: app-window Openbox config, xdotool/dbus in display-setup. */
-        const val LAYER_VERSION = 8 // 3: bwrap stand-in, 4: sound, 5: plasma-setup, 6: dpkg excludes, 7: bazaar-setup, 8: windsystem
+        const val LAYER_VERSION = 9 // 3: bwrap stand-in, 4: sound, 5: plasma-setup, 6: dpkg excludes, 7: bazaar-setup, 8: windsystem
 
         val DPKG_CONFIG = """force-unsafe-io
             |path-exclude=/usr/share/locale/*
