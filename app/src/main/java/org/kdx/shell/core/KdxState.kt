@@ -232,6 +232,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     private fun attachDebian(d: org.kdx.shell.droid.DebianSystem?) {
         debian = d
         if (d != null) syncLinuxDns()
+        startLauncher(d)
         if (d != null && !orphansCleaned) {
             orphansCleaned = true
             // Linux programs left running by an earlier KDX session (their windows are gone). On Android every
@@ -473,12 +474,14 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         closeMenus()
         val w = KWindow(nextId++, KApp.LINUXDISPLAY, "app:$n", currentDesktop, maximized = true)
         w.title = "KDE Plasma"; w.fullscreen = true
+        disp.extraEnv = scaleEnv // apps started on Plasma's screen (Flatpaks via KDX) get the same scale
         windows.add(w); activeId = w.id
         viewModelScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
                     ensureSound()
                     org.kdx.shell.droid.KdePlasma.writeDefaults(deb)
+                    runCatching { org.kdx.shell.droid.LinuxLauncher.installWrapper(deb) } // Flatpak apps from Plasma's menu
                     disp.start(xw, xh)
                     disp.logFile = newLogFile("KDE Plasma")
                     val start = { disp.launch(org.kdx.shell.droid.KdePlasma.COMMAND, org.kdx.shell.droid.KdePlasma.env + scaleEnv) }
@@ -486,6 +489,35 @@ class KdxState(app: Application) : AndroidViewModel(app) {
                     disp.appProcess = start()
                 }
             }.onFailure { e -> toast("Couldn't start KDE Plasma: ${e.message}"); close(w) }
+        }
+    }
+
+    // ---- programs inside DroidSystem asking KDX to start Flatpak apps (see LinuxLauncher) ----
+    private var launcher: org.kdx.shell.droid.LinuxLauncher? = null
+
+    private fun startLauncher(d: org.kdx.shell.droid.DebianSystem?) {
+        if (launcher?.let { d != null && it.sys == d } == true) return
+        launcher?.stop(); launcher = null
+        if (d == null) return
+        val l = org.kdx.shell.droid.LinuxLauncher(d) { r -> runRequested(r) }
+        launcher = l
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { l.start() }.onFailure { toast("Couldn't start the app launcher: ${it.message}") }
+            runCatching { org.kdx.shell.droid.LinuxLauncher.installWrapper(d) }
+        }
+    }
+
+    /** Called on a background thread for each `flatpak run` inside DroidSystem; returns an error message or null. */
+    private fun runRequested(r: org.kdx.shell.droid.LinuxLauncher.Request): String? {
+        val runner = flatpakRunner ?: return "the Linux system isn't ready"
+        runner.appDir(r.id) ?: return "${r.id} is not installed"
+        val disp = r.display?.let { appDisplays[it] }
+        return if (disp != null && disp.desktop) {
+            // from real KDE Plasma: open on Plasma's own screen, where KWin manages its window
+            runner.launch(r.id, r.args, on = disp, commandOverride = r.command); null
+        } else {
+            // from anywhere else (a terminal, an app window): a KDX window of its own
+            viewModelScope.launch { launchFlatpak(r.id) }; null
         }
     }
 

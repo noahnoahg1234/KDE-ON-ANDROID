@@ -405,7 +405,12 @@ private fun RealKdeSection(state: KdxState) {
         Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (plasmaReady) Button({ state.launchPlasma() }) { Text(if (running) "Show KDE Plasma" else "Start KDE Plasma") }
             if (deb != null && !plasmaReady) OutlinedButton({ state.retryPlasmaSetup() }) { Text("Run installer again") }
+            if (plasmaReady && !org.kdx.shell.droid.KdePlasma.bazaarInstalled(deb!!))
+                OutlinedButton({ state.open(org.kdx.shell.core.KApp.KONSOLE, "bazaar-setup") }) { Text("Install the real Bazaar") }
         }
+        Text("The real Bazaar app store (from Flathub) comes with Plasma. Apps you install with it, or with KDX's own " +
+            "Bazaar, show up in Plasma's menu and open on Plasma's screen.", color = c.inactiveText, fontSize = 11.sp,
+            modifier = Modifier.padding(top = 4.dp))
         Text("In Plasma, the small K button in the top corner takes you back to KDX. Plasma needs about 800 MB of RAM.",
             color = c.inactiveText, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
     }

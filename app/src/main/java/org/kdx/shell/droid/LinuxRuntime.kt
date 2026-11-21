@@ -39,10 +39,17 @@ class LinuxDisplay(
     /** The Flatpak app shown on this display, if any. */
     @Volatile var appId: String? = null
 
-    val env get() = mapOf(
+    /** Extra variables for everything on this display (e.g. KDE Plasma's interface scale), on top of [env]'s defaults. */
+    @Volatile var extraEnv: Map<String, String> = emptyMap()
+
+    val env get() = baseEnv + extraEnv
+
+    private val baseEnv get() = mapOf(
         "DISPLAY" to ":$display", "KDX_TAG" to tag, "XDG_RUNTIME_DIR" to "/tmp/runtime-root", "NO_AT_BRIDGE" to "1",
         // abstract socket: no file path, so it works the same in DroidSystem and in every Flatpak sandbox
         "DBUS_SESSION_BUS_ADDRESS" to SESSION_BUS,
+        // a system bus too: some apps (e.g. the real Bazaar) crash without one
+        "DBUS_SYSTEM_BUS_ADDRESS" to SYSTEM_BUS,
         // sound goes to DroidSystem's PulseAudio server (see LinuxAudio)
         "PULSE_SERVER" to LinuxAudio.PULSE_SERVER,
         // X11 everywhere: there is no Wayland compositor
@@ -81,6 +88,12 @@ class LinuxDisplay(
             // if a bus from an earlier run still owns the address, this one exits and the old one keeps serving
             sharedBus = sys.command(listOf("dbus-daemon", "--session", "--nofork", "--nopidfile", "--address=$SESSION_BUS"))
                 .start().also { drain(it, "dbus") }
+            if (systemBus?.isAlive != true) {
+                // the stock system bus wants to switch to the messagebus user, which proot can't; this one doesn't
+                File(sys.root, SYSTEM_BUS_CONF).apply { parentFile?.mkdirs() }.writeText(SYSTEM_BUS_XML)
+                systemBus = sys.command(listOf("dbus-daemon", "--config-file=/$SYSTEM_BUS_CONF", "--nofork", "--nopidfile"))
+                    .start().also { drain(it, "dbus-system") }
+            }
         }
     }
 
@@ -153,7 +166,24 @@ class LinuxDisplay(
         /** Openbox config for app windows: no decorations, normal windows maximized (see DebianSystem.applyDroidLayer). */
         const val APP_RC = "etc/xdg/openbox/kdx-app.xml"
         const val SESSION_BUS = "unix:abstract=/kdx/dbus-session"
+        const val SYSTEM_BUS = "unix:abstract=/kdx/dbus-system"
+        const val SYSTEM_BUS_CONF = "etc/dbus-1/kdx-system.conf"
+        /** A system bus for DroidSystem: same permissions as a session bus (one user), no service activation. */
+        val SYSTEM_BUS_XML = """<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <type>system</type>
+  <listen>$SYSTEM_BUS</listen>
+  <auth>EXTERNAL</auth>
+  <policy context="default">
+    <allow send_destination="*" eavesdrop="true"/>
+    <allow eavesdrop="true"/>
+    <allow own="*"/>
+  </policy>
+</busconfig>
+"""
         @Volatile private var sharedBus: Process? = null
+        @Volatile private var systemBus: Process? = null
     }
 
     /** Where this display's log is also saved (set by KDX for app windows), so it survives crashes. */
@@ -241,13 +271,13 @@ class FlatpakRunner(val sys: DebianSystem, private val display: LinuxDisplay) {
     private val triplet get() = when (sys.arch) { "amd64" -> "x86_64-linux-gnu"; "arm64" -> "aarch64-linux-gnu"; "armhf" -> "arm-linux-gnueabihf"; else -> "i386-linux-gnu" }
 
     /** Builds the process that runs [id]. Throws with a readable message if something is missing. */
-    fun command(id: String, args: List<String> = emptyList(), on: LinuxDisplay = display): ProcessBuilder {
+    fun command(id: String, args: List<String> = emptyList(), on: LinuxDisplay = display, commandOverride: String? = null): ProcessBuilder {
         val app = appDir(id) ?: throw IOException("$id is not installed")
         val ini = DroidSystem.parseIni(File(app, "metadata").readText())
         val meta = ini["Application"] ?: throw IOException("$id: bad metadata")
         val runtimeRef = meta["runtime"] ?: throw IOException("$id: no runtime")
         val runtime = runtimeDir(runtimeRef) ?: throw IOException("Runtime $runtimeRef is missing – reinstall with: flatpak install --user flathub $id")
-        val command = meta["command"] ?: throw IOException("$id has no command")
+        val command = commandOverride ?: meta["command"] ?: throw IOException("$id has no command")
 
         // the sandbox root: an empty tree with Flatpak's standard symlinks
         val sb = File(sys.root, "var/lib/droidsystem/flatpak-root").apply { mkdirs() }
@@ -301,6 +331,8 @@ class FlatpakRunner(val sys: DebianSystem, private val display: LinuxDisplay) {
             "XDG_DATA_DIRS" to "/app/share:/usr/share:/usr/share/runtime/share:/run/host/share",
             "XDG_CONFIG_HOME" to "$dataHome/config", "XDG_DATA_HOME" to "$dataHome/data", "XDG_CACHE_HOME" to "$dataHome/cache",
             "GIO_USE_VFS" to "local", "GTK_USE_PORTAL" to "0", "GTK_A11Y" to "none",
+            // apps that manage Flatpak themselves (the real Bazaar) use DroidSystem's per-user installation
+            "FLATPAK_USER_DIR" to "/root/.local/share/flatpak", "HOST_XDG_DATA_HOME" to "/root/.local/share",
             // Chromium/Electron's own sandbox needs kernel namespaces Android doesn't give apps
             "ZYPAK_DISABLE_SANDBOX" to "1", "ELECTRON_DISABLE_SANDBOX" to "1", "ELECTRON_NO_SANDBOX" to "1",
             "QTWEBENGINE_DISABLE_SANDBOX" to "1", "MOZ_DISABLE_CONTENT_SANDBOX" to "1",
@@ -329,9 +361,9 @@ class FlatpakRunner(val sys: DebianSystem, private val display: LinuxDisplay) {
         }
     }
 
-    fun launch(id: String, args: List<String> = emptyList(), on: LinuxDisplay = display): Process {
-        on.appId = id
-        return command(id, args, on).start().also { it.outputStream.close(); on.drain(it, id) }
+    fun launch(id: String, args: List<String> = emptyList(), on: LinuxDisplay = display, commandOverride: String? = null): Process {
+        if (!on.desktop) on.appId = id // a desktop display (KDE Plasma) shows many apps
+        return command(id, args, on, commandOverride).start().also { it.outputStream.close(); on.drain(it, id) }
     }
 
     /** Stops any leftover processes of [id] (from a closed window, a crash or an earlier KDX session). */

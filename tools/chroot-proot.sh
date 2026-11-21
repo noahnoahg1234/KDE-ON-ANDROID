@@ -15,7 +15,8 @@ done
 for b in "${binds[@]}"; do
   host=${b%%:*}; guest=${b#*:}; [ "$b" = "$host" ] && guest=$host
   t="$root$guest"
-  if [ -d "$host" ]; then mkdir -p "$t"; else mkdir -p "$(dirname "$t")"; [ -e "$t" ] || touch "$t"; fi
+  if [ -d "$host" ]; then mkdir -p "$t" 2>/dev/null; else mkdir -p "$(dirname "$t")" 2>/dev/null; [ -e "$t" ] || touch "$t" 2>/dev/null; fi
+  [ -e "$t" ] || continue   # e.g. inside a symlinked folder: skip (proot would follow it inside the guest)
   mountpoint -q "$t" 2>/dev/null || mount --bind "$host" "$t" 2>/dev/null
 done
 exec chroot "$root" /bin/sh -c 'cd "$0" 2>/dev/null; exec "$@"' "$cwd" "$@"

@@ -29,7 +29,8 @@ object KdePlasma {
         "XDG_SESSION_TYPE" to "x11", "XDG_CURRENT_DESKTOP" to "KDE", "XDG_SESSION_DESKTOP" to "KDE",
         "DESKTOP_SESSION" to "plasma", "KDE_FULL_SESSION" to "true", "KDE_SESSION_VERSION" to "6",
         "XDG_CONFIG_DIRS" to "/$DEFAULTS_DIR:/etc/xdg",
-        "XDG_DATA_DIRS" to "/usr/local/share:/usr/share",
+        // Flatpak apps (installed with KDX's Bazaar or the real one) appear in Plasma's menus too
+        "XDG_DATA_DIRS" to "/usr/local/share:/usr/share:/root/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share",
         // no GPU: Qt Quick's software renderer is much faster than OpenGL on llvmpipe, and no compositing
         "QT_QUICK_BACKEND" to "software", "KWIN_COMPOSE" to "N", "KWIN_X11_NO_SYNC_TO_VBLANK" to "1",
         "QT_QPA_PLATFORMTHEME" to "kde", "QT_AUTO_SCREEN_SCALE_FACTOR" to "0",
@@ -93,6 +94,29 @@ object KdePlasma {
         File(sys.root, "root/.config").mkdirs()
     }
 
+    /** The real Bazaar app store on Flathub. */
+    const val BAZAAR_ID = "io.github.kolunmi.Bazaar"
+
+    fun bazaarInstalled(sys: DebianSystem) = File(sys.root, "root/.local/share/flatpak/app/$BAZAAR_ID").isDirectory
+
+    /**
+     * Installs the real Bazaar (a GTK app store for Flathub; needs the GNOME runtime, ~300 MB the first time) into
+     * DroidSystem's per-user Flatpak installation, and puts it on Plasma's desktop. Inside DroidSystem, its "Open"
+     * buttons and Plasma's menu start apps through KDX (see LinuxLauncher).
+     */
+    fun bazaarSetupScript(): String = """#!/bin/sh
+# Installs the real Bazaar app store (Flathub) for KDE Plasma and DroidSystem.
+set -e
+flatpak-setup >/dev/null
+echo "Installing Bazaar from Flathub (about 13 MB, plus the GNOME runtime the first time)…"
+flatpak install -y --noninteractive --user flathub $BAZAAR_ID
+# on Plasma's desktop too
+mkdir -p /root/Desktop
+f=/root/.local/share/flatpak/exports/share/applications/$BAZAAR_ID.desktop
+if [ -f "${'$'}f" ]; then cp "${'$'}f" /root/Desktop/; chmod +x /root/Desktop/$BAZAAR_ID.desktop; fi
+echo "Bazaar is installed. Open it from KDE Plasma's menu or desktop."
+"""
+
     /** The command that runs a whole Plasma session on the current display. */
     const val COMMAND = "startplasma-x11"
 
@@ -117,8 +141,10 @@ apt-get -q update
 apt-get -q install -y --no-install-recommends -o Dpkg::Progress-Fancy=0 ${PACKAGES.joinToString(" ")} || { dpkg --configure -a; apt-get -q install -y -f --no-install-recommends; }
 # build KDE's application database now, so the first start doesn't have to
 echo "Preparing KDE's app database…"
-XDG_DATA_DIRS=/usr/local/share:/usr/share XDG_CONFIG_DIRS=/$DEFAULTS_DIR:/etc/xdg kbuildsycoca6 --noincremental >/dev/null 2>&1 || true
+XDG_DATA_DIRS=/usr/local/share:/usr/share:/root/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share XDG_CONFIG_DIRS=/$DEFAULTS_DIR:/etc/xdg kbuildsycoca6 --noincremental >/dev/null 2>&1 || true
 fc-cache >/dev/null 2>&1 || true
+# the real Bazaar app store (Flathub), for Plasma's menu and desktop; Plasma works without it if this fails
+bazaar-setup || echo "(The Bazaar app store couldn't be installed now. Run bazaar-setup later to try again.)"
 echo
 echo "KDE Plasma is installed. Open it from Kickoff → KDE Plasma."
 """

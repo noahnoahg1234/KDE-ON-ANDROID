@@ -49,3 +49,28 @@ class KdePlasmaTest {
         assertTrue(c.lines().containsAll(listOf("path-exclude=/usr/share/locale/*", "path-exclude=/usr/share/doc/*", "path-exclude=/usr/share/man/*")))
     }
 }
+
+class LinuxLauncherTest {
+    private val b64 = { s: String -> java.util.Base64.getEncoder().encodeToString(s.toByteArray()) }
+
+    @Test fun parsesRequests() {
+        val r = org.kdx.shell.droid.LinuxLauncher.parse(listOf("KDX1 secret", "DISPLAY :12", "COMMAND firefox",
+            "ARG ${b64("--new-window")}", "ARG ${b64("https://kde.org/a b")}", "RUN org.mozilla.firefox"), "secret")
+        assertEquals(org.kdx.shell.droid.LinuxLauncher.Request("org.mozilla.firefox", "firefox", listOf("--new-window", "https://kde.org/a b"), 12), r)
+    }
+
+    @Test fun rejectsWrongTokenAndBadIds() {
+        assertNull(org.kdx.shell.droid.LinuxLauncher.parse(listOf("KDX1 nope", "RUN a.b"), "secret"))
+        assertNull(org.kdx.shell.droid.LinuxLauncher.parse(listOf("KDX1 secret", "RUN ../../etc"), "secret"))
+        assertNull(org.kdx.shell.droid.LinuxLauncher.parse(listOf("KDX1 secret", "RUN a;rm"), "secret"))
+    }
+
+    @Test fun scriptsAreValidShell() {
+        for ((name, script) in listOf("wrapper" to org.kdx.shell.droid.LinuxLauncher.WRAPPER, "bazaar-setup" to org.kdx.shell.droid.KdePlasma.bazaarSetupScript())) {
+            val f = java.io.File.createTempFile(name, ".sh").apply { writeText(script) }
+            val p = ProcessBuilder(if (name == "wrapper") "bash" else "sh", "-n", f.path).redirectErrorStream(true).start()
+            assertEquals("$name: " + p.inputStream.bufferedReader().readText(), 0, p.waitFor())
+            f.delete()
+        }
+    }
+}

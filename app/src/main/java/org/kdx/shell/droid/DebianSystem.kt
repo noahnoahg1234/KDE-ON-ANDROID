@@ -261,6 +261,7 @@ class DebianSystem(
             |flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
             |echo "Flatpak is ready. Install apps with: flatpak install flathub <app-id>"
             |""".trimMargin())
+        tool("bazaar-setup", KdePlasma.bazaarSetupScript())
         tool("display-setup", """#!/bin/sh
             |# Installs the X display server used by KDX's Linux Display window.
             |set -e
@@ -332,7 +333,7 @@ class DebianSystem(
 
     companion object {
         /** Bump when applyDroidLayer changes. 2: app-window Openbox config, xdotool/dbus in display-setup. */
-        const val LAYER_VERSION = 6 // 3: bwrap stand-in, 4: sound, 5: plasma-setup, 6: dpkg excludes
+        const val LAYER_VERSION = 7 // 3: bwrap stand-in, 4: sound, 5: plasma-setup, 6: dpkg excludes, 7: bazaar-setup
 
         val DPKG_CONFIG = """force-unsafe-io
             |path-exclude=/usr/share/locale/*

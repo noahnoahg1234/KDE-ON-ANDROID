@@ -160,6 +160,13 @@ KCalc, Spectacle, System Monitor, Info Center and System Settings.
   no screen locker, file indexer or splash screen. D-Bus services that can't work under proot (the splash screen,
   and the desktop portal, which needs FUSE) are replaced with ones that fail at once, so Plasma doesn't wait on them.
   These are defaults in their own config folder, so changes made in Plasma's System Settings win.
+- **Flatpak apps in Plasma:** apps installed with KDX's Bazaar or the real one appear in Plasma's menus and open on
+  Plasma's screen. `flatpak run` can't build its bubblewrap sandbox under proot, so inside DroidSystem
+  `/usr/bin/flatpak` is a small wrapper: `run` asks KDX (over a token-protected localhost socket) to start the
+  app with its own Flatpak runner on the caller's display; every other command goes to the real flatpak.
+- **The real Bazaar:** the Flathub app store `io.github.kolunmi.Bazaar` is installed with Plasma (`bazaar-setup`,
+  also a button in Settings) and put on Plasma's desktop. DroidSystem now has a D-Bus system bus too (Bazaar
+  crashes without one).
 - **KDE apps on their own:** KDE apps opened from KDX's Kickoff use KDE's Qt integration, so they get Breeze too.
 - **Faster install and start:** dpkg skips translations, manuals and docs (Plasma runs in English inside
   DroidSystem). That's about a third of Plasma's files, and installing becomes about 2× faster. KDE's app database
