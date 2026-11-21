@@ -557,7 +557,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
             performance = p.getString("wind.perf", d.performance)!!, crashDialog = p.getBoolean("wind.crashDialog", d.crashDialog),
             autoRestart = p.getBoolean("wind.autoRestart", d.autoRestart), debugLog = p.getString("wind.debug", d.debugLog)!!,
             dllOverrides = p.getString("wind.dlls", d.dllOverrides)!!, resolution = p.getString("wind.res", d.resolution)!!,
-            modernTheme = p.getBoolean("wind.modern", d.modernTheme),
+            modernTheme = p.getBoolean("wind.modern", d.modernTheme), touchFrames = p.getBoolean("wind.touchFrames", d.touchFrames),
         )
     }
 
@@ -569,7 +569,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
             .putBoolean("wind.clock24", c.clock24h).putBoolean("wind.clockSec", c.clockSeconds).putBoolean("wind.search", c.showSearch)
             .putLong("wind.wallpaper", c.wallpaper).putString("wind.perf", c.performance).putBoolean("wind.crashDialog", c.crashDialog)
             .putBoolean("wind.autoRestart", c.autoRestart).putString("wind.debug", c.debugLog).putString("wind.dlls", c.dllOverrides)
-            .putString("wind.res", c.resolution).putBoolean("wind.modern", c.modernTheme).apply()
+            .putString("wind.res", c.resolution).putBoolean("wind.modern", c.modernTheme).putBoolean("wind.touchFrames", c.touchFrames).apply()
         windSession?.let { s -> s.config = c; viewModelScope.launch(Dispatchers.IO) { runCatching { s.applySettings() } } }
     }
 

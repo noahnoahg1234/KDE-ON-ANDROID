@@ -168,6 +168,7 @@ exec box64 /usr/lib/wine/wineserver64.x86 "${'$'}@"
         val dllOverrides: String = "",          // e.g. "d3d9=native,builtin;xinput1_3=native"
         val resolution: String = "phone",       // phone / balanced / fast (like KDE Plasma's)
         val modernTheme: Boolean = true,        // Wine's flat "Light" window theme instead of the classic grey one
+        val touchFrames: Boolean = true,        // title bars, window buttons, borders, menus and scrollbars sized for fingers
     )
 
     /** Environment for every Windows program. */
@@ -197,11 +198,34 @@ exec box64 /usr/lib/wine/wineserver64.x86 "${'$'}@"
     }
 
     /** Registry settings for [c] (imported with `regedit /S` – one process for all of them). */
+    /**
+     * Sizes of window parts (title bar, its buttons, borders, menus, scrollbars). Wine draws them at classic pixel
+     * sizes (an 18 px title bar), which is tiny on a phone screen; for touch they grow with the DPI. Values are in
+     * Windows' twips: -15 × pixels.
+     */
+    fun windowMetrics(c: Config): String {
+        val scale = (c.dpi.coerceAtLeast(96) / 96f) * (if (c.touchFrames) 1.35f else 1f)
+        fun px(base: Int) = "\"" + (-15 * Math.round(base * scale)) + "\""
+        return "[HKEY_CURRENT_USER\\Control Panel\\Desktop\\WindowMetrics]\r\n" +
+            "\"CaptionHeight\"=${px(22)}\r\n\"CaptionWidth\"=${px(22)}\r\n" +
+            "\"SmCaptionHeight\"=${px(18)}\r\n\"SmCaptionWidth\"=${px(18)}\r\n" +
+            "\"BorderWidth\"=${px(if (c.touchFrames) 2 else 1)}\r\n\"PaddedBorderWidth\"=\"0\"\r\n" +
+            "\"MenuHeight\"=${px(22)}\r\n\"MenuWidth\"=${px(22)}\r\n" +
+            "\"ScrollHeight\"=${px(if (c.touchFrames) 20 else 16)}\r\n\"ScrollWidth\"=${px(if (c.touchFrames) 20 else 16)}\r\n\r\n"
+    }
+
+    /** Height of a window's title-bar strip (frame + caption) in X pixels, matching [windowMetrics]. */
+    fun titleBarPx(c: Config): Int {
+        val scale = (c.dpi.coerceAtLeast(96) / 96f) * (if (c.touchFrames) 1.35f else 1f)
+        return Math.round(22 * scale) + Math.round((if (c.touchFrames) 2 else 1) * scale) + 8
+    }
+
     fun registry(c: Config): String = buildString {
         append("Windows Registry Editor Version 5.00\r\n\r\n")
         append("[HKEY_CURRENT_USER\\Software\\Wine]\r\n\"Version\"=\"${c.windowsVersion}\"\r\n\r\n")
         append("[HKEY_CURRENT_USER\\Control Panel\\Desktop]\r\n\"LogPixels\"=dword:${"%08x".format(c.dpi)}\r\n\r\n")
         append("[HKEY_CURRENT_USER\\Software\\Wine\\Fonts]\r\n\"LogPixels\"=dword:${"%08x".format(c.dpi)}\r\n\r\n")
+        append(windowMetrics(c))
         append("[HKEY_CURRENT_USER\\Software\\Wine\\Direct3D]\r\n\"renderer\"=\"${if (c.renderer == "gdi") "gdi" else "gl"}\"\r\n\r\n")
         append("[HKEY_CURRENT_USER\\Software\\Wine\\Drivers]\r\n\"Audio\"=\"${if (c.sound) "pulse" else ""}\"\r\n\r\n")
         // crashes: no interactive Wine debugger dialog; winedbg prints the backtrace into the program's log instead
@@ -327,7 +351,10 @@ exec box64 /usr/lib/wine/wineserver64.x86 "${'$'}@"
      */
     const val WINDOW_LIST_SCRIPT = """while :; do
   for w in ${'$'}(xdotool search --onlyvisible --name '.' 2>/dev/null); do
-    t=${'$'}(xdotool getwindowname "${'$'}w" 2>/dev/null); [ -n "${'$'}t" ] && printf '%s\t%s\n' "${'$'}w" "${'$'}t"
+    t=${'$'}(xdotool getwindowname "${'$'}w" 2>/dev/null) || continue
+    [ -n "${'$'}t" ] || continue
+    eval ${'$'}(xdotool getwindowgeometry --shell "${'$'}w" 2>/dev/null)
+    printf '%s\t%s %s %s %s\t%s\n' "${'$'}w" "${'$'}X" "${'$'}Y" "${'$'}WIDTH" "${'$'}HEIGHT" "${'$'}t"
   done
   echo --
   sleep 1.5

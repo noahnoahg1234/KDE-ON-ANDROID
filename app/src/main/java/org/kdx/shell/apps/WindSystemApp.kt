@@ -77,7 +77,10 @@ fun WindSystemApp(state: KdxState, w: KWindow) {
     var settings by remember { mutableStateOf(false) }
     val searchFocus = remember { FocusRequester() }
 
-    LinuxDisplayApp(state, w, followApp = false,
+    // Windows programs expect a mouse: one-finger drag = mouse drag (move windows by their title bars, select, drag
+    // scrollbars); two fingers scroll; double-tap a title bar to maximize; hold = right-click
+    LinuxDisplayApp(state, w, followApp = false, mouseStyleTouch = true,
+        onDoubleTap = { x, y -> state.windSession?.let { ss -> state.io { ss.doubleTapAt(x, y) } } },
         overlay = {
             if (menu) {
                 Box(Modifier.fillMaxSize().clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { menu = false; query = "" })
@@ -345,6 +348,7 @@ private fun BoxScope.WindSettings(state: KdxState, wc: WindColors, close: () -> 
 
             Head("Look")
             Switch("Modern window style", "Wine's flat \"Light\" theme for title bars, buttons and menus (off = classic)", cfg.modernTheme) { set(cfg.copy(modernTheme = it)) }
+            Switch("Touch-sized window frames", "Bigger title bars, window buttons, borders, menus and scrollbars (applies to windows opened after the change)", cfg.touchFrames) { set(cfg.copy(touchFrames = it)) }
 
             Head("Taskbar and desktop")
             Switch("Dark taskbar and menus", null, cfg.darkTaskbar) { set(cfg.copy(darkTaskbar = it)) }

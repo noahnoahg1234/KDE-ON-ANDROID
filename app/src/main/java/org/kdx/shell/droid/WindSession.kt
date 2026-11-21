@@ -129,22 +129,58 @@ class WindSession(
 
     private fun startWatcher() {
         watcher?.destroy()
-        val script = WindSystem.WINDOW_LIST_SCRIPT.replace("  echo --", "  echo \"-- \$(xdotool getactivewindow 2>/dev/null)\"")
+        // the "--" line also carries the active window and the screen size: "-- <active> <width> <height>"
+        val script = WindSystem.WINDOW_LIST_SCRIPT.replace("  echo --", "  echo \"-- \$(xdotool getactivewindow 2>/dev/null || echo none) \$(xdotool getdisplaygeometry 2>/dev/null)\"")
         val p = sys.command(listOf("/bin/bash", "-c", script), "/root", display.env).start()
         p.outputStream.close()
         watcher = p
         Thread({
             val cur = mutableListOf<Pair<String, String>>()
+            val rects = HashMap<String, IntArray>()
             runCatching {
                 p.inputStream.bufferedReader().forEachLine { l ->
                     if (l.startsWith("--")) {
-                        val active = l.removePrefix("--").trim().ifEmpty { null }
-                        onWindows(cur.filter { (_, t) -> t != "Default IME" && t != "Wine System Tray" && !t.startsWith("OleMainThreadWndName") }, active)
-                        cur.clear()
-                    } else l.split('\t', limit = 2).takeIf { it.size == 2 }?.let { cur += it[0] to it[1] }
+                        val f = l.removePrefix("--").trim().split(' ')
+                        val active = f.getOrNull(0)?.takeIf { it != "none" && it.isNotEmpty() }
+                        f.getOrNull(1)?.toIntOrNull()?.let { screenWidth = it }
+                        val keep = cur.filter { (_, t) -> t != "Default IME" && t != "Wine System Tray" && !t.startsWith("OleMainThreadWndName") }
+                        geometry = keep.mapNotNull { (id, _) -> rects[id]?.let { id to it } }.toMap()
+                        activeWindow = active
+                        onWindows(keep, active)
+                        cur.clear(); rects.clear()
+                    } else l.split('\t', limit = 3).takeIf { it.size == 3 }?.let { (id, g, title) ->
+                        g.split(' ').mapNotNull { it.toIntOrNull() }.takeIf { it.size == 4 }?.let { rects[id] = it.toIntArray() }
+                        cur += id to title
+                    }
                 }
             }
         }, "windsystem-windows").apply { isDaemon = true; start() }
+    }
+
+    /** Each window's X, Y, width and height (from the window list). */
+    @Volatile var geometry: Map<String, IntArray> = emptyMap(); private set
+    @Volatile private var activeWindow: String? = null
+    @Volatile private var screenWidth = 0
+
+    /**
+     * A double-tap at ([x], [y]) on a window's title bar maximizes or restores it. Wine passes title-bar clicks to the
+     * window manager (to move windows), so it never sees that double-click itself; this uses Wine's window menu
+     * instead (Alt+Space, then Maximize or Restore) – a real Windows maximize, title-bar buttons included.
+     * Returns true when the tap was on a title bar.
+     */
+    fun doubleTapAt(x: Int, y: Int): Boolean {
+        val hit = titleBarAt(x, y) ?: return false
+        val (id, r) = hit
+        val maximized = r[0] <= 0 && r[1] <= 0 && screenWidth > 0 && r[2] >= screenWidth - 2
+        xdo("windowactivate --sync $id key --clearmodifiers alt+space sleep 0.3 key ${if (maximized) "r" else "x"}")
+        return true
+    }
+
+    /** The window whose title-bar strip contains ([x], [y]) – the active one first. */
+    fun titleBarAt(x: Int, y: Int): Pair<String, IntArray>? {
+        val bar = WindSystem.titleBarPx(config.copy(dpi = if (config.dpi == 0) autoDpi else config.dpi))
+        val candidates = geometry.entries.sortedByDescending { it.key == activeWindow }
+        return candidates.firstOrNull { (_, r) -> x >= r[0] && x < r[0] + r[2] && y >= r[1] && y < r[1] + bar }?.let { it.key to it.value }
     }
 
     /** Ends every Windows program (like shutting down). */

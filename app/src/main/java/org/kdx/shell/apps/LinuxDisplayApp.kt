@@ -144,6 +144,10 @@ fun LinuxDisplayApp(
     state: KdxState, w: KWindow,
     /** false for a whole desktop on the display (WindSystem): don't follow/close with "the app". */
     followApp: Boolean = true,
+    /** Start in mouse-style touch (drag = mouse drag), for whole desktops like WindSystem. */
+    mouseStyleTouch: Boolean = false,
+    /** Called with the X position of a double-tap (WindSystem: title bars maximize). */
+    onDoubleTap: ((Int, Int) -> Unit)? = null,
     /** Drawn over the display (menus, dialogs). */
     overlay: @Composable BoxScope.() -> Unit = {},
     /** Drawn under the display (a taskbar). */
@@ -155,6 +159,7 @@ fun LinuxDisplayApp(
     val s = remember(w) {
         w.retain("display") {
             DisplaySession().also { ds ->
+                if (mouseStyleTouch) ds.touchMode = false
                 ds.keyboard = state.linuxKeyboard
                 if (appNo != null) ds.onClose = { state.releaseDisplay(appNo) }
             }
@@ -279,7 +284,7 @@ fun LinuxDisplayApp(
                 IconButton({ state.open(KApp.KATE, f.path) }, Modifier.size(40.dp)) { Icon(Icons.Filled.Article, "App log", tint = c.text) }
             }
             Text(if (s.touchMode) "Tap = click · drag = scroll · hold = right-click · hold+drag = drag · 2 fingers: tap = right-click, pinch = zoom · 3-finger tap = paste"
-                else "Mouse mode: drag = drag · hold = right-click · 2-finger tap = right-click",
+                else "Mouse mode: drag = drag (title bars move windows) · double-tap = double-click · hold = right-click · 2 fingers: scroll, tap = right-click",
                 Modifier.weight(1f).padding(horizontal = 4.dp), color = c.inactiveText, fontSize = 11.sp, maxLines = 1)
             if (s.zoom > 1.01f) IconButton({ s.zoom = 1f; s.pan = Offset.Zero }, Modifier.size(40.dp)) { Icon(Icons.Filled.FitScreen, "Fit") }
             if (s.connected) Text(
@@ -363,6 +368,8 @@ fun LinuxDisplayApp(
                         mark = { p, k -> s.marks += TouchMark(p, k, android.os.SystemClock.uptimeMillis()) },
                     )
                 }
+                val doubleTap = rememberUpdatedState(onDoubleTap)
+                LaunchedEffect(touch) { touch.onDoubleTap = { x, y -> doubleTap.value?.invoke(x, y) } }
                 // long press, fling and fading touch marks run on the frame clock
                 LaunchedEffect(touch) {
                     while (true) {

@@ -212,6 +212,10 @@ Windows itself isn't included: Wine provides the Windows APIs and tells programs
 - **Start menu:** installed programs (from their shortcuts), the Programs folder, Wine's tools (File Explorer,
   Command Prompt, Notepad, Task Manager, Control Panel, Registry Editor…), *Run "…"* for any command, settings, the
   Android/WindSystem folder, and Restart or Shut down.
+- **Windows:** title bars work by touch. One finger drags a title bar to move the window, double-tap maximizes or
+  restores it, and the buttons minimize, maximize and close. WindSystem uses mouse-style touch (drag = drag, hold =
+  right-click, two fingers scroll), and title bars, window buttons, borders, menus and scrollbars are sized for
+  fingers.
 - **Crash handler:** a crashed program shows what happened (Wine's exception and winedbg's backtrace), and a report
   is saved to *Crash reports*. You can restart it there, and optionally it restarts automatically. Every program's
   output goes to *Logs*.

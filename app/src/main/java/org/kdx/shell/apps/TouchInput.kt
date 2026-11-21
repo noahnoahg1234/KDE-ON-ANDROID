@@ -31,6 +31,8 @@ class TouchTranslator(
     private val onPan: (Offset) -> Unit = {},
     private val haptic: () -> Unit = {},
     private val mark: (Offset, Kind) -> Unit = { _, _ -> },
+    /** Called with the X position of a double-tap (after its two clicks were sent). */
+    var onDoubleTap: (Int, Int) -> Unit = { _, _ -> },
     private val longPressMs: Long = 450,
     private val doubleTapMs: Long = 350,
 ) {
@@ -143,9 +145,11 @@ class TouchTranslator(
             held || now - t0 >= longPressMs -> { out(fb.first, fb.second, 4); out(fb.first, fb.second, 0); mark(start, Kind.RIGHT) }
             else -> {
                 // a quick second tap near the first one lands exactly on it: apps see a double-click
-                val at = if (now - lastTapAt < doubleTapMs && (p - lastTapPos).getDistance() < slopPx * 3) lastTapFb else fb
+                val double = now - lastTapAt < doubleTapMs && (p - lastTapPos).getDistance() < slopPx * 3
+                val at = if (double) lastTapFb else fb
                 out(at.first, at.second, 0); out(at.first, at.second, 1); out(at.first, at.second, 0)
-                lastTapAt = now; lastTapPos = p; lastTapFb = at
+                lastTapAt = if (double) 0L else now; lastTapPos = p; lastTapFb = at
+                if (double) onDoubleTap(at.first, at.second)
                 mark(start, Kind.TAP)
             }
         }

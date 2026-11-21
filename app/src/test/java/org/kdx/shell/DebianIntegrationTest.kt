@@ -712,4 +712,64 @@ class DebianIntegrationTest {
         println(d)
         assertTrue(d.contains("Device:") && d.contains("wine-10") && d.contains("(exit 0)"))
     }
+
+    /** Windows' title bars in WindSystem: drag moves the window, the maximize button and a double-click maximize. */
+    @Test fun y_windowFrames() {
+        assumeTrue(work != null && sys.isInstalled && System.getProperty("kdx.wind") != null && org.kdx.shell.droid.WindSystem.isInstalled(sys))
+        val shared = File(work, "WindSystem").apply { mkdirs() }
+        val sys = DebianSystem(this.sys.root, this.sys.proot.copy(binds = this.sys.proot.binds + (shared.path to shared.path)), File(work, "home"), arch)
+        val d = LinuxDisplay(sys, 44, desktop = true)
+        val windows = java.util.concurrent.atomic.AtomicReference<List<Pair<String, String>>>(emptyList())
+        try {
+            d.start(1280, 800)
+            val s = org.kdx.shell.droid.WindSession(sys, d, shared, org.kdx.shell.droid.WindSystem.Config(), 96,
+                onCrash = { _, _ -> }, onWindows = { l, _ -> windows.set(l) }, status = {})
+            s.start()
+            s.run(org.kdx.shell.droid.WindSystem.BUILTIN.first { it.name == "Notepad" })
+            var waited = 0
+            while (windows.get().none { it.second.contains("Notepad") } && waited < 60) { Thread.sleep(1000); waited++ }
+            val id = windows.get().first { it.second.contains("Notepad") }.first
+            fun geo(): String = sys.query("DISPLAY=:44 xdotool getwindowgeometry $id").second.lines().filter { it.contains("Position") || it.contains("Geometry") }.joinToString(" ").trim()
+            Thread.sleep(2000)
+            val g0 = geo(); println("start:     $g0")
+            val rfb = RfbClient(port = d.port); rfb.connect()
+            val loop = Thread { runCatching { rfb.loop() } }.apply { isDaemon = true; start() }
+            val pos = Regex("Position: (\\d+),(\\d+)").find(g0)!!.groupValues.drop(1).map { it.toInt() }
+            val size = Regex("Geometry: (\\d+)x(\\d+)").find(g0)!!.groupValues.drop(1).map { it.toInt() }
+            // the phone's way: touches → TouchTranslator (WindSystem's mouse-style touch) → VNC
+            val t = org.kdx.shell.apps.TouchTranslator(slopPx = 20f, toFb = { it.x.toInt() to it.y.toInt() }, out = { x, y, m -> rfb.pointer(x, y, m) })
+            t.touchMode = { false }
+            t.onDoubleTap = { x, y -> println("double-tap at $x,$y → title bar: ${s.doubleTapAt(x, y)}") }
+            fun o(x: Int, y: Int) = androidx.compose.ui.geometry.Offset(x.toFloat(), y.toFloat())
+            var now = 10_000L
+            fun tap(x: Int, y: Int) { t.down(1, o(x, y), now); now += 60; t.up(1, o(x, y), now); now += 150; Thread.sleep(250) }
+            fun posOf(g: String) = Regex("Position: (\\d+),(\\d+)").find(g)!!.groupValues.drop(1).map { it.toInt() }
+            fun sizeOf(g: String) = Regex("Geometry: (\\d+)x(\\d+)").find(g)!!.groupValues.drop(1).map { it.toInt() }
+            val tx = pos[0] + size[0] / 3; val ty = pos[1] + 14
+            // 1. drag the title bar with one finger
+            t.down(1, o(tx, ty), now); for (i in 1..20) { now += 30; t.move(1, o(tx + i * 10, ty + i * 8), now); Thread.sleep(40) }
+            now += 30; t.up(1, o(tx + 200, ty + 160), now); now += 1000; Thread.sleep(1500)
+            val g1 = geo(); println("dragged:   $g1")
+            snapshot(d, "frames-dragged", 800)
+            // 2. double-tap the title bar: maximize
+            val p1 = posOf(g1)
+            Thread.sleep(2000) // the window list (with positions) updates every 1.5 s
+            tap(p1[0] + size[0] / 3, p1[1] + 28); tap(p1[0] + size[0] / 3, p1[1] + 28); Thread.sleep(2500)
+            val g2 = geo(); println("double-tap: $g2")
+            // 3. double-tap again: restore
+            Thread.sleep(1500); tap(400, 20); tap(400, 20); Thread.sleep(2500)
+            val g3 = geo(); println("restored:  $g3")
+            // 4. the maximize button (touch-sized frames: buttons ~30 px wide)
+            val p3 = posOf(g3); val s3 = sizeOf(g3)
+            now += 1000; tap(p3[0] + s3[0] - 75, p3[1] + 28); Thread.sleep(2000)
+            val g4 = geo(); println("button:    $g4")
+            snapshot(d, "frames-maximized", 800)
+            assertTrue("double-tap maximizes: $g2", g2.contains("1280x"))
+            assertTrue("double-tap restores: $g3", !g3.contains("1280x"))
+            assertTrue("maximize button: $g4", g4.contains("1280x"))
+            rfb.close(); loop.join(1000)
+            assertNotEquals("title bar drag moves the window", g0, g1)
+            s.shutdown()
+        } finally { d.stop() }
+    }
 }
