@@ -81,6 +81,7 @@ fun WindSystemApp(state: KdxState, w: KWindow) {
     // scrollbars); two fingers scroll; double-tap a title bar to maximize; hold = right-click
     LinuxDisplayApp(state, w, followApp = false, mouseStyleTouch = true,
         onDoubleTap = { x, y -> state.windSession?.let { ss -> state.io { ss.doubleTapAt(x, y) } } },
+        desktopSize = { w, h -> state.windGeometry(w, h) }, desktopSizeKey = state.windConfig.resolution,
         overlay = {
             if (menu) {
                 Box(Modifier.fillMaxSize().clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { menu = false; query = "" })
@@ -298,6 +299,7 @@ private fun BoxScope.CrashDialog(state: KdxState, wc: WindColors, crash: WindSys
     }
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun BoxScope.WindSettings(state: KdxState, wc: WindColors, close: () -> Unit) {
     val cfg = state.windConfig
@@ -328,14 +330,28 @@ private fun BoxScope.WindSettings(state: KdxState, wc: WindColors, close: () -> 
             Head("Windows version programs see")
             WindSystem.WINDOWS_VERSIONS.forEach { (id, name) -> Choice(name, cfg.windowsVersion == id) { set(cfg.copy(windowsVersion = id)) } }
 
-            Head("Screen")
+            Head("Screen resolution")
             listOf("phone" to "Phone's resolution (sharpest)", "balanced" to "Balanced", "fast" to "Fast (fewest pixels)").forEach { (id, l) ->
                 Choice(l, cfg.resolution == id) { set(cfg.copy(resolution = id)) }
             }
+            Text("Fixed size (the picture is scaled to fit; pinch to zoom)", color = wc.text, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                WindSystem.RESOLUTIONS.forEach { r ->
+                    val (rw, rh) = WindSystem.fixedResolution(r)!!
+                    FilterChip(cfg.resolution == r, { set(cfg.copy(resolution = r)) },
+                        label = { Text(r.replace("x", " × ") + if (rh > rw) " (portrait)" else "") })
+                }
+            }
+            var custom by remember { mutableStateOf(if (WindSystem.fixedResolution(cfg.resolution) != null && cfg.resolution !in WindSystem.RESOLUTIONS) cfg.resolution else "") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(custom, { custom = it.filter { ch -> ch.isDigit() || ch == 'x' } }, Modifier.weight(1f), singleLine = true,
+                    label = { Text("Custom (e.g. 1152x864)") })
+                TextButton({ WindSystem.fixedResolution(custom)?.let { (cw, ch) -> set(cfg.copy(resolution = "${cw}x$ch")) } ?: state.toast("Type a size like 1152x864") }) { Text("Use") }
+            }
+            Text("Changes apply right away; programs that were open may need to be moved or reopened.", color = wc.dim, fontSize = 11.sp)
             Text("Text and window size (DPI)", color = wc.text, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
             Row { listOf(0 to "Auto", 96 to "100%", 120 to "125%", 144 to "150%", 192 to "200%").forEach { (d, l) ->
                 FilterChip(cfg.dpi == d, { set(cfg.copy(dpi = d)) }, label = { Text(l) }, modifier = Modifier.padding(end = 4.dp)) } }
-            Text("Resolution changes apply after Restart (Start → Power).", color = wc.dim, fontSize = 11.sp)
 
             Head("Graphics and sound")
             Choice("3D through OpenGL (games, 3D programs)", cfg.renderer == "gl") { set(cfg.copy(renderer = "gl")) }

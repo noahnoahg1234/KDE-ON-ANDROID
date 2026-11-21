@@ -148,6 +148,9 @@ fun LinuxDisplayApp(
     mouseStyleTouch: Boolean = false,
     /** Called with the X position of a double-tap (WindSystem: title bars maximize). */
     onDoubleTap: ((Int, Int) -> Unit)? = null,
+    /** X screen size for a desktop display's area (default: KDE Plasma's resolution setting). [desktopSizeKey] changes re-apply it. */
+    desktopSize: ((Int, Int) -> Pair<Int, Int>)? = null,
+    desktopSizeKey: Any? = null,
     /** Drawn over the display (menus, dialogs). */
     overlay: @Composable BoxScope.() -> Unit = {},
     /** Drawn under the display (a taskbar). */
@@ -318,11 +321,11 @@ fun LinuxDisplayApp(
             val bmp = s.bitmap
             var size by remember { mutableStateOf(IntSize.Zero) }
             // app windows: make the X screen match this window's shape (debounced)
-            if (appNo != null) LaunchedEffect(size, s.connected, s.autoScale, state.linuxPerformance, state.plasmaResolution) {
+            if (appNo != null) LaunchedEffect(size, s.connected, s.autoScale, state.linuxPerformance, state.plasmaResolution, desktopSizeKey) {
                 if (!s.connected || size.width == 0) return@LaunchedEffect
                 delay(500)
-                if (disp.desktop) { // KDE Plasma: its own resolution setting (phone's resolution = 1:1 pixels)
-                    val (xw, xh) = state.plasmaGeometry(size.width, size.height)
+                if (disp.desktop) { // a whole desktop: its own resolution setting (phone's resolution = 1:1 pixels)
+                    val (xw, xh) = desktopSize?.invoke(size.width, size.height) ?: state.plasmaGeometry(size.width, size.height)
                     s.rfb?.setDesktopSize(xw, xh)
                     return@LaunchedEffect
                 }

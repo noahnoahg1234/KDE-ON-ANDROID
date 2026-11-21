@@ -596,8 +596,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         appDisplays[n] = disp
         org.kdx.shell.droid.LinuxAppsService.update(ctx, appDisplays.size)
         val dm = ctx.resources.displayMetrics
-        val res = when (windConfig.resolution) { "fast" -> PlasmaResolution.FAST; "balanced" -> PlasmaResolution.BALANCED; else -> PlasmaResolution.PHONE }
-        val (xw, xh) = plasmaGeometry(dm.widthPixels, dm.heightPixels, res)
+        val (xw, xh) = windGeometry(dm.widthPixels, dm.heightPixels)
         val autoDpi = ((96 * plasmaScale(minOf(xw, xh))) / 24).toInt().coerceAtLeast(4) * 24
         closeMenus()
         val w = KWindow(nextId++, KApp.WINDSYSTEM, "app:$n", currentDesktop, maximized = true)
@@ -631,6 +630,11 @@ class KdxState(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    /** WindSystem's X screen size for a [wPx] x [hPx] area: a fixed resolution, or phone/balanced/fast like Plasma's. */
+    fun windGeometry(wPx: Int, hPx: Int): Pair<Int, Int> =
+        org.kdx.shell.droid.WindSystem.fixedResolution(windConfig.resolution)
+            ?: plasmaGeometry(wPx, hPx, when (windConfig.resolution) { "fast" -> PlasmaResolution.FAST; "balanced" -> PlasmaResolution.BALANCED; else -> PlasmaResolution.PHONE })
 
     /** Ends WindSystem (all Windows programs) and closes its window. */
     fun endWindSystem() {

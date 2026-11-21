@@ -69,4 +69,14 @@ class WindSystemTest {
         assertEquals(p.inputStream.bufferedReader().readText(), 0, p.waitFor())
         setup.delete()
     }
+
+    @Test fun resolutions() {
+        assertEquals(1280 to 720, WindSystem.fixedResolution("1280x720"))
+        assertEquals(720 to 1280, WindSystem.fixedResolution("720x1280"))
+        assertEquals(1360 to 768, WindSystem.fixedResolution("1366x768")) // X screens are multiples of 8 wide
+        assertNull(WindSystem.fixedResolution("phone"))
+        assertNull(WindSystem.fixedResolution("12x"))
+        assertTrue(WindSystem.RESOLUTIONS.all { WindSystem.fixedResolution(it) != null })
+        assertFalse("Openbox mustn't strip every frame", WindSystem.OPENBOX_XML.contains("<decor>no</decor>"))
+    }
 }

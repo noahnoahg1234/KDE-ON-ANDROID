@@ -98,8 +98,8 @@ class DebianSystem(
     }
 
     /** Runs a command and returns its output (for small queries). */
-    fun query(cmd: String, cwd: String = "/root"): Pair<Int, String> {
-        val p = shell(cmd, cwd).start()
+    fun query(cmd: String, cwd: String = "/root", env: Map<String, String> = emptyMap()): Pair<Int, String> {
+        val p = shell(cmd, cwd, env).start()
         p.outputStream.close()
         val out = p.inputStream.bufferedReader().readText()
         return p.waitFor() to out

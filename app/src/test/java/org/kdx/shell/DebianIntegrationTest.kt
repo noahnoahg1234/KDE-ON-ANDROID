@@ -772,4 +772,35 @@ class DebianIntegrationTest {
             s.shutdown()
         } finally { d.stop() }
     }
+
+    /** If Wine doesn't draw a window's title bar (Decorated not N), Openbox draws one: windows always have a title bar. */
+    @Test fun z_titleBarFallback() {
+        assumeTrue(work != null && sys.isInstalled && System.getProperty("kdx.wind") != null && org.kdx.shell.droid.WindSystem.isInstalled(sys))
+        val shared = File(work, "WindSystem").apply { mkdirs() }
+        val sys = DebianSystem(this.sys.root, this.sys.proot.copy(binds = this.sys.proot.binds + (shared.path to shared.path)), File(work, "home"), arch)
+        val d = LinuxDisplay(sys, 45, desktop = true)
+        val windows = java.util.concurrent.atomic.AtomicReference<List<Pair<String, String>>>(emptyList())
+        try {
+            d.start(1280, 800)
+            val s = org.kdx.shell.droid.WindSession(sys, d, shared, org.kdx.shell.droid.WindSystem.Config(), 96,
+                onCrash = { _, _ -> }, onWindows = { l, _ -> windows.set(l) }, status = {})
+            s.start()
+            // simulate the setting not taking effect: Wine leaves the frame to the window manager
+            sys.run("WINEPREFIX=${org.kdx.shell.droid.WindSystem.PREFIX} windsystem-wine reg add 'HKCU\\Software\\Wine\\X11 Driver' /v Decorated /d Y /f >/dev/null 2>&1")
+            s.run(org.kdx.shell.droid.WindSystem.BUILTIN.first { it.name == "Notepad" })
+            var waited = 0
+            while (windows.get().none { it.second.contains("Notepad") } && waited < 60) { Thread.sleep(1000); waited++ }
+            Thread.sleep(2500)
+            snapshot(d, "titlebar-fallback", 800)
+            val id = windows.get().first { it.second.contains("Notepad") }.first
+            // Openbox frames it: the client window then has a frame parent with an offset (title bar height)
+            val (_, tree) = sys.query("DISPLAY=:45 xwininfo -id $id | grep -E 'Relative upper-left Y'")
+            println("frame offset: $tree")
+            assertTrue("Openbox title bar above the window: $tree", Regex("Y:\\s+(\\d+)").find(tree)!!.groupValues[1].toInt() > 10)
+            s.shutdown()
+        } finally {
+            sys.run("WINEPREFIX=${org.kdx.shell.droid.WindSystem.PREFIX} windsystem-wine reg add 'HKCU\\Software\\Wine\\X11 Driver' /v Decorated /d N /f >/dev/null 2>&1")
+            d.stop()
+        }
+    }
 }

@@ -30,6 +30,7 @@ class WindSession(
         WindSystem.FOLDERS.forEach { File(shared, it).mkdirs() }
         WindSystem.ensureWrappers(sys)
         sys.run("xsetroot -solid '#%06x' 2>/dev/null; true".format(config.wallpaper and 0xFFFFFF), env = display.env)
+        File(sys.root, WindSystem.OPENBOX_RC).apply { parentFile?.mkdirs() }.writeText(WindSystem.OPENBOX_XML) // current config, also on older installs
         display.launch("openbox --config-file /${WindSystem.OPENBOX_RC}")
         val prefix = File(sys.root, WindSystem.PREFIX.removePrefix("/"))
         // a complete drive C: has its registry and the Windows folder
@@ -64,6 +65,8 @@ class WindSession(
 
     private val BOOT = "${WindSystem.WINE} wineboot --init </dev/null >/tmp/windsystem-boot.log 2>&1; rc=${'$'}?; cat /tmp/windsystem-boot.log; exit ${'$'}rc"
 
+    private fun log(line: String) = runCatching { File(shared, "Logs/WindSystem.log").appendText(line + "\n") }
+
     /** Writes [config] into the registry and drive letters (one regedit run). */
     fun applySettings() {
         val c = config.copy(dpi = if (config.dpi == 0) autoDpi else config.dpi)
@@ -71,6 +74,13 @@ class WindSession(
         sys.run(WindSystem.driveScript(c, shared.absolutePath), env = env)
         sys.run("${WindSystem.WINE} regedit /S 'Z:\\tmp\\windsystem-settings.reg' >/dev/null 2>&1; true", env = env)
         reg.delete()
+        // title bars: Wine draws them only with X11 Driver\Decorated = N; make sure that's really set
+        val (_, out) = sys.query("${WindSystem.WINE} reg query 'HKCU\\Software\\Wine\\X11 Driver' /v Decorated 2>/dev/null </dev/null", env = env)
+        log("title bars: ${if (out.contains("REG_SZ") && out.trim().endsWith("N")) "drawn by Wine" else "setting missing – adding it again"}")
+        if (!(out.contains("REG_SZ") && out.trim().endsWith("N"))) {
+            sys.run("${WindSystem.WINE} reg add 'HKCU\\Software\\Wine\\X11 Driver' /v Decorated /d N /f >/dev/null 2>&1 </dev/null; " +
+                "${WindSystem.WINE} reg add 'HKCU\\Software\\Wine\\X11 Driver' /v Managed /d Y /f >/dev/null 2>&1 </dev/null; true", env = env)
+        }
         sys.run("xsetroot -solid '#%06x' 2>/dev/null; true".format(c.wallpaper and 0xFFFFFF), env = display.env)
     }
 

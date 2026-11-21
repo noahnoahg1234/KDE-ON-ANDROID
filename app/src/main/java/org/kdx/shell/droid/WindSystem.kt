@@ -146,6 +146,16 @@ exec box64 /usr/lib/wine/wineserver64.x86 "${'$'}@"
         }
     }
 
+    /** Fixed screen sizes for WindSystem (besides phone/balanced/fast). */
+    val RESOLUTIONS = listOf("800x600", "1024x768", "1280x720", "1280x800", "1366x768", "1440x900", "1600x900", "1920x1080",
+        "720x1280", "1080x1920")
+
+    /** A fixed resolution "WxH" as (w, h), or null for phone/balanced/fast. */
+    fun fixedResolution(r: String): Pair<Int, Int>? = r.split('x').takeIf { it.size == 2 }?.let { (a, b) ->
+        val w = a.toIntOrNull() ?: return null; val h = b.toIntOrNull() ?: return null
+        (w / 8 * 8).coerceIn(640, 3840) to h.coerceIn(400, 2160)
+    }
+
     /** Windows versions Wine can report to programs. */
     val WINDOWS_VERSIONS = listOf("win10" to "Windows 10", "win11" to "Windows 11", "win81" to "Windows 8.1", "win7" to "Windows 7", "winxp64" to "Windows XP")
 
@@ -360,15 +370,20 @@ exec box64 /usr/lib/wine/wineserver64.x86 "${'$'}@"
   sleep 1.5
 done"""
 
-    /** Openbox config for WindSystem: Wine draws Windows-style frames, so no Openbox decorations; click to focus. */
+    /** Openbox config for WindSystem: Wine draws Windows-style frames (and asks Openbox for none); click to focus. */
     const val OPENBOX_RC = "etc/xdg/openbox/windsystem.xml"
     val OPENBOX_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <openbox_config xmlns="http://openbox.org/3.4/rc">
   <focus><focusNew>yes</focusNew><followMouse>no</followMouse></focus>
   <placement><policy>Smart</policy><center>yes</center></placement>
-  <theme><name>Clearlooks</name><titleLayout>NLIMC</titleLayout></theme>
+  <theme><name>Clearlooks</name><titleLayout>NLIMC</titleLayout>
+    <!-- a big title font makes Openbox's (fallback) title bars tall enough for fingers -->
+    <font place="ActiveWindow"><name>sans</name><size>16</size><weight>bold</weight></font>
+    <font place="InactiveWindow"><name>sans</name><size>16</size></font>
+  </theme>
   <desktops><number>1</number></desktops>
-  <applications><application class="*"><decor>no</decor></application></applications>
+  <!-- no rule stripping every frame: Wine-drawn windows ask for no frame themselves (Motif hints), and any window
+       that doesn't draw its own title bar gets Openbox's – so there is always a title bar -->
   <mouse><context name="Root"><mousebind button="Right" action="Press"/></context></mouse>
 </openbox_config>
 """
