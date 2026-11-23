@@ -256,6 +256,15 @@ class ShellScreenshotTest {
         assertTrue(!state.safeMode)
     }
 
+    @Test fun flickerBanner() {
+        rule.runOnUiThread { state.reportFlicker("Recent events:\n12:00:01.100 KDX lost focus (another window is on top)") }
+        shot("76-flicker")
+        rule.onNodeWithText("The screen keeps flickering").assertExists()
+        rule.onNodeWithText("Dismiss").performClick()
+        rule.mainClock.advanceTimeBy(500)
+        assertTrue(state.flickerDetails == null)
+    }
+
     @Test fun privacyVpnPage() {
         rule.runOnUiThread { state.open(KApp.PRIVACY) }
         rule.mainClock.advanceTimeBy(2000); Thread.sleep(500); rule.mainClock.advanceTimeBy(500)

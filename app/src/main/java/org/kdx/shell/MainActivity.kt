@@ -18,9 +18,28 @@ class MainActivity : ComponentActivity() {
     private val state: KdxState by viewModels()
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener { readClip() }
 
+    /** False while the recovery screen is shown: KDX's state and screen are not created at all then. */
+    private var desktopShown = false
+    private val flicker = org.kdx.shell.core.StartGuard.Flicker()
+    private fun log(msg: String) = org.kdx.shell.core.StartGuard.log(this, msg)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         org.kdx.shell.core.StartGuard.installCrashRecorder(this)
         super.onCreate(savedInstanceState)
+        log("KDX window created" + if (savedInstanceState != null) " again (Android rebuilt it)" else "")
+        if (org.kdx.shell.core.StartGuard.mode == org.kdx.shell.core.StartGuard.Mode.RECOVERY) {
+            setContentView(RecoveryScreen.build(this) {
+                // start the desktop in safe mode, from the recovery screen
+                org.kdx.shell.core.StartGuard.mode = org.kdx.shell.core.StartGuard.Mode.SAFE
+                showDesktop()
+            })
+            return
+        }
+        showDesktop()
+    }
+
+    private fun showDesktop() {
+        desktopShown = true
         enableEdgeToEdge()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             // As a home screen, back never leaves KDX – it closes menus / minimises the active window.
@@ -36,10 +55,29 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() { super.onResume(); log("KDX in front") }
+
+    override fun onStop() { super.onStop(); log("KDX hidden") }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        log("Screen settings changed: ${newConfig.screenWidthDp}x${newConfig.screenHeightDp} dp, dark=${(newConfig.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES}")
+    }
+
+    private fun lostScreen(what: String) {
+        log(what)
+        if (desktopShown && flicker.lost(System.currentTimeMillis())) {
+            flicker.reset()
+            state.reportFlicker(org.kdx.shell.core.StartGuard.report(this))
+        }
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) { lostScreen("KDX lost focus (another window is on top)"); return }
+        log("KDX has focus")
         // Android only lets the focused app read the clipboard.
-        if (hasFocus) readClip()
+        if (desktopShown) readClip()
     }
 
     private fun readClip() {
@@ -51,6 +89,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
+        if (!desktopShown) return
         // Home button pressed while KDX is in front: behave like "show desktop".
         if (intent.hasCategory(android.content.Intent.CATEGORY_HOME)) {
             if (state.kickoffOpen || state.krunnerOpen || state.overviewOpen) state.closeMenus()
@@ -60,17 +99,19 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
-        state.save()
+        lostScreen("KDX paused")
+        if (desktopShown) state.save()
     }
 
     override fun onDestroy() {
-        getSystemService(ClipboardManager::class.java).removePrimaryClipChangedListener(clipListener)
+        log("KDX window destroyed" + if (isChangingConfigurations) " (to be rebuilt)" else "")
+        if (desktopShown) getSystemService(ClipboardManager::class.java).removePrimaryClipChangedListener(clipListener)
         super.onDestroy()
     }
 
     /** Plasma keyboard shortcuts for hardware keyboards / desktop mode. */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (handleShortcut(event)) return true
+        if (desktopShown && handleShortcut(event)) return true
         return super.dispatchKeyEvent(event)
     }
 

@@ -263,6 +263,7 @@ fun SystemSettings(state: KdxState, w: KWindow) {
         RealKdeSection(state)
         LinuxSystemSection(state)
         if (state.debian != null) StoragePackingSection(state)
+        TroubleshootingSection(state)
         Section("Wallpaper", Icons.Filled.Wallpaper) {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Wallpapers.forEachIndexed { i, wp ->
@@ -355,6 +356,24 @@ private fun Toggle(label: String, value: Boolean, onChange: (Boolean) -> Unit) {
  * System Settings → Real KDE Plasma: one switch that sets up everything (Linux system, Debian, Plasma) and then runs
  * the real KDE Plasma desktop full screen, at the phone's own resolution if wanted.
  */
+/** The event log behind the safe-mode / flicker notices, for when the screen misbehaves. */
+@Composable
+private fun TroubleshootingSection(state: KdxState) {
+    val c = LocalBreeze.current
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    Section("Troubleshooting", Icons.Filled.BugReport) {
+        Text("If the screen blinks or flickers, KDX records what happened (restarts, crashes, Android ending it, other " +
+            "windows taking the screen). Copy it and send it so the cause can be found.", color = c.inactiveText, fontSize = 13.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            androidx.compose.material3.OutlinedButton({
+                clipboard.setText(androidx.compose.ui.text.AnnotatedString(org.kdx.shell.core.StartGuard.report(ctx)))
+                state.toast("Diagnostics copied")
+            }) { Text("Copy diagnostics") }
+        }
+    }
+}
+
 @Composable
 private fun RealKdeSection(state: KdxState) {
     val c = LocalBreeze.current

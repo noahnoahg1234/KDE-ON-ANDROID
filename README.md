@@ -286,6 +286,14 @@ Plasma, WindSystem, automatic space saving), which breaks the loop. A banner say
 saves the details – or, on Android 11+, what Android says, e.g. low memory). **Copy details** copies the report;
 **Resume** turns things back on. After 3 minutes of running fine, KDX forgets the recent starts.
 
+The check runs the moment KDX's process starts, before any of its screen exists, so a crash while starting up is
+caught too. If KDX keeps restarting even in safe mode (5 starts within 5 minutes), it shows a plain **recovery screen**
+instead of its desktop, which none of KDX's own screen code runs in: the details, **Copy details**, **Start KDX in
+safe mode**, turning off Plasma auto-start and the custom wallpaper, or picking another home screen. If KDX keeps
+running but its window keeps losing the screen (another app's window or overlay on top: 5 times within 20 seconds), a
+"The screen keeps flickering" notice appears. Everything is also in an event log: System Settings → Troubleshooting →
+**Copy diagnostics**.
+
 ## Install
 Download `app-release.apk` from the latest **Build KDX** run in GitHub Actions (artifact `KDX-apk`) and install it.
 To use KDX as your home screen: *Kickoff → Leave → Default Home App*, then choose **KDX**.

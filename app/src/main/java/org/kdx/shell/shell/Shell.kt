@@ -80,6 +80,7 @@ fun Shell(state: KdxState) {
         }
         FullscreenLayer(state)
         if (state.safeMode) SafeModeBanner(state, Modifier.align(Alignment.TopCenter).statusBarsPadding())
+        else state.flickerDetails?.let { FlickerBanner(state, it, Modifier.align(Alignment.TopCenter).statusBarsPadding()) }
     }
 }
 
@@ -94,7 +95,7 @@ private fun SafeModeBanner(state: KdxState, modifier: Modifier) {
         .border(1.dp, c.neutral, androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).padding(14.dp)) {
         Text("KDX kept restarting", color = c.text, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
         Text("That's the screen blinking black. To stop it, nothing heavy starts by itself right now (KDE Plasma, " +
-            "WindSystem, automatic space saving). " +
+            "WindSystem, the Linux system, automatic space saving). " +
             (state.safeModeDetails.lines().firstOrNull { it.startsWith("•") }?.removePrefix("• ") ?: ""),
             color = c.inactiveText, fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp))
         if (details) Text(state.safeModeDetails, color = c.text, fontSize = androidx.compose.ui.unit.TextUnit(11f, androidx.compose.ui.unit.TextUnitType.Sp),
@@ -103,6 +104,30 @@ private fun SafeModeBanner(state: KdxState, modifier: Modifier) {
             androidx.compose.material3.TextButton({ details = !details }) { Text(if (details) "Hide details" else "Details") }
             androidx.compose.material3.TextButton({ clipboard.setText(androidx.compose.ui.text.AnnotatedString(state.safeModeDetails)); state.toast("Copied") }) { Text("Copy details") }
             androidx.compose.material3.Button({ state.leaveSafeMode() }) { Text("Resume") }
+        }
+    }
+}
+
+/** KDX keeps running but its window keeps losing the screen (another window on top, Android rebuilding it…). */
+@Composable
+private fun FlickerBanner(state: KdxState, details: String, modifier: Modifier) {
+    val c = org.kdx.shell.core.LocalBreeze.current
+    var show by remember { mutableStateOf(false) }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    Column(modifier.padding(10.dp).widthIn(max = 560.dp)
+        .background(c.window, androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+        .border(1.dp, c.neutral, androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).padding(14.dp)) {
+        Text("The screen keeps flickering", color = c.text, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        Text("KDX keeps running, but something keeps taking the screen away from it – often another app's window or " +
+            "overlay (a screen filter, bubble, floating button or accessibility app), or Android asking for memory. " +
+            "Copy the details and send them so the cause can be found.",
+            color = c.inactiveText, fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp))
+        if (show) Text(details, color = c.text, fontSize = androidx.compose.ui.unit.TextUnit(11f, androidx.compose.ui.unit.TextUnitType.Sp),
+            modifier = Modifier.padding(top = 6.dp).heightIn(max = 260.dp).verticalScroll(rememberScrollState()))
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.End) {
+            androidx.compose.material3.TextButton({ show = !show }) { Text(if (show) "Hide details" else "Details") }
+            androidx.compose.material3.TextButton({ clipboard.setText(androidx.compose.ui.text.AnnotatedString(details)); state.toast("Copied") }) { Text("Copy details") }
+            androidx.compose.material3.Button({ state.flickerDetails = null }) { Text("Dismiss") }
         }
     }
 }
