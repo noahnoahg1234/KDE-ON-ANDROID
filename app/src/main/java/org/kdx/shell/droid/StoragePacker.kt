@@ -74,6 +74,62 @@ object StoragePacker {
         }.toMap()
     }
 
+    // ---- automatic saving when the phone is low on space ----
+
+    /** A pack that automatic saving could make: its current size, when it was last opened, and whether it's open now. */
+    data class Candidate(val id: String, val size: Long, val lastUsed: Long, val inUse: Boolean, val packed: Boolean)
+
+    const val DAY = 24 * 3600_000L
+    const val CRITICAL = 500L * 1024 * 1024
+
+    /**
+     * Which parts to pack (in order) when [free] bytes are under [threshold] after cleaning up: ones not opened for
+     * [idleDays] days (any, when the phone is nearly full), never one that's open, biggest saving first, only while
+     * still needed and only if there's room to write the archive (about 40 % of the original, plus a margin).
+     */
+    fun planAutoSave(free: Long, threshold: Long, candidates: List<Candidate>, now: Long, idleDays: Int = 3): List<String> {
+        if (free >= threshold) return emptyList()
+        val critical = free < CRITICAL
+        var left = free
+        val plan = mutableListOf<String>()
+        candidates.filter { !it.packed && !it.inUse && it.size > 50L * 1024 * 1024 && (critical || now - it.lastUsed > idleDays * DAY) }
+            .sortedByDescending { it.size }
+            .forEach { c ->
+                if (left >= threshold) return@forEach
+                val need = (c.size * 0.4).toLong() + 200L * 1024 * 1024
+                if (left < need) return@forEach
+                plan += c.id
+                left += (c.size * 0.65).toLong() // a pack is roughly a third of the original
+            }
+        return plan
+    }
+
+    /** What automatic saving did. */
+    data class AutoSaveResult(val freedBytes: Long, val cleaned: Boolean, val packed: List<String>, val failed: List<String>)
+
+    /**
+     * Cleans up, then packs per [planAutoSave] while space stays low. [freeBytes] measures the phone's free space,
+     * [lastUsed]/[inUse] describe each pack.
+     */
+    fun autoSave(sys: DebianSystem, freeBytes: () -> Long, threshold: Long, lastUsed: (String) -> Long, inUse: (String) -> Boolean,
+                 log: (String) -> Unit = {}, now: Long = System.currentTimeMillis()): AutoSaveResult {
+        ensureTool(sys)
+        val start = freeBytes()
+        log("Low on space (${start / 1048576} MB free): cleaning up")
+        sys.run(CLEANUPS.joinToString("; ") { it.command } + " </dev/null", log)
+        val sizes = runCatching { scan(sys) }.getOrDefault(emptyMap())
+        val plan = planAutoSave(freeBytes(), threshold, PACKS.map { p ->
+            Candidate(p.id, sizes["pack:${p.id}"] ?: 0, lastUsed(p.id), inUse(p.id), isPacked(sys, p.id))
+        }, now)
+        val packed = mutableListOf<String>(); val failed = mutableListOf<String>()
+        for (id in plan) {
+            if (freeBytes() >= threshold) break
+            log("Packing $id")
+            if (sys.run("droidsystem-pack pack $id </dev/null", log) == 0) packed += id else failed += id
+        }
+        return AutoSaveResult((freeBytes() - start).coerceAtLeast(0), true, packed, failed)
+    }
+
     /** `droidsystem-pack`: packs, unpacks and measures packs (see [PACKS]). */
     fun toolScript(): String = """#!/bin/bash
 # droidsystem-pack: packs parts of DroidSystem that aren't used all the time into compressed archives (saving

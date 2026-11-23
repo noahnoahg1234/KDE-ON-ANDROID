@@ -870,4 +870,18 @@ class DebianIntegrationTest {
             if (id == "plasma") assertEquals("no holds left", "0", sys.query("apt-mark showhold | wc -l").second.trim())
         }
     }
+
+    /** Automatic saving with (faked) low space: cleans up, packs WindSystem's idle drive C:, which then unpacks fine. */
+    @Test fun zc_autoSave() {
+        assumeTrue(work != null && sys.isInstalled && System.getProperty("kdx.pack") != null && File(sys.root, "root/.windsystem").exists())
+        val P = org.kdx.shell.droid.StoragePacker
+        val GB = 1024L * 1024 * 1024
+        val free = { if (P.isPacked(sys, "windsystem-c")) 3 * GB else GB } // "low" until drive C: is packed
+        val r = P.autoSave(sys, free, 2 * GB, lastUsed = { 0L }, inUse = { it != "windsystem-c" }, log = ::log)
+        println("auto save: $r")
+        assertEquals(listOf("windsystem-c"), r.packed)
+        assertTrue(P.isPacked(sys, "windsystem-c"))
+        assertEquals(0, sys.run("droidsystem-pack unpack windsystem-c", ::log))
+        assertTrue(File(sys.root, "root/.windsystem/system.reg").isFile)
+    }
 }

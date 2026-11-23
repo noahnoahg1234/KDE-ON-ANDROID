@@ -98,4 +98,20 @@ class WindSystemTest {
         assertEquals(listOf("plasma", "windsystem-c", "flatpak"), ids)
         assertTrue(org.kdx.shell.droid.LinuxLauncher.WRAPPER.contains("droidsystem-pack unpack flatpak"))
     }
+
+    @Test fun autoSavePlan() {
+        val P = org.kdx.shell.droid.StoragePacker
+        val GB = 1024L * 1024 * 1024; val now = 100 * P.DAY
+        fun c(id: String, gb: Double, daysAgo: Int, inUse: Boolean = false, packed: Boolean = false) =
+            org.kdx.shell.droid.StoragePacker.Candidate(id, (gb * GB).toLong(), now - daysAgo * P.DAY, inUse, packed)
+        val all = listOf(c("plasma", 0.8, 10), c("windsystem-c", 1.4, 5), c("flatpak", 4.0, 1))
+        assertEquals("enough space: nothing", emptyList<String>(), P.planAutoSave(3 * GB, 2 * GB, all, now))
+        assertEquals("idle ones, biggest first; recently used Flatpak kept", listOf("windsystem-c", "plasma"), P.planAutoSave(GB, 2 * GB, all, now))
+        assertEquals("stops once enough is freed", listOf("windsystem-c"), P.planAutoSave((1.5 * GB).toLong(), 2 * GB, all, now))
+        assertEquals("nearly full (450 MB): even a just-used part is packed", listOf("flatpak"),
+            P.planAutoSave(450L * 1024 * 1024, 2 * GB, listOf(c("flatpak", 0.5, 0)), now))
+        assertEquals("never what's open", listOf("plasma"), P.planAutoSave(GB, 2 * GB, listOf(c("windsystem-c", 1.4, 5, inUse = true), c("plasma", 0.8, 10)), now))
+        assertEquals("already packed: skipped", emptyList<String>(), P.planAutoSave(GB, 2 * GB, listOf(c("plasma", 0.8, 10, packed = true)), now))
+        assertEquals("no room to write the archive: skipped", emptyList<String>(), P.planAutoSave(100L * 1024 * 1024, 2 * GB, listOf(c("flatpak", 4.0, 10)), now))
+    }
 }

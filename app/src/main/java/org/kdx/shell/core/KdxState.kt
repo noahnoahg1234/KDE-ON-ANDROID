@@ -461,6 +461,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
      * brings the running session back instead of starting another.
      */
     fun launchPlasma() {
+        markUsed("plasma")
         val deb = debian ?: run { toast("Turn on the Linux system (DroidSystem 2) in System Settings first"); return }
         windows.firstOrNull { it.fullscreen && it.app == KApp.LINUXDISPLAY }?.let { it.minimized = false; it.desktop = currentDesktop; focus(it); return }
         if (!displaySetUp(deb)) return
@@ -526,6 +527,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
 
     /** Called on a background thread for each `flatpak run` inside DroidSystem; returns an error message or null. */
     private fun runRequested(r: org.kdx.shell.droid.LinuxLauncher.Request): String? {
+        markUsed("flatpak")
         val runner = flatpakRunner ?: return "the Linux system isn't ready"
         runner.appDir(r.id) ?: return "${r.id} is not installed"
         val disp = r.display?.let { appDisplays[it] }
@@ -588,6 +590,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
 
     /** Opens WindSystem full screen (installing it first if needed); a second call brings it back. */
     fun launchWindSystem() {
+        markUsed("windsystem-c")
         val deb = debian ?: run { toast("Turn on the Linux system (DroidSystem 2) in System Settings first"); return }
         windows.firstOrNull { it.app == KApp.WINDSYSTEM }?.let { it.minimized = false; it.desktop = currentDesktop; focus(it); return }
         if (!displaySetUp(deb)) return
@@ -648,8 +651,63 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         windows.filter { it.app == KApp.WINDSYSTEM }.forEach { close(it) }
     }
 
+    // ---- automatic space saving (System Settings → Storage packing) ----
+    var autoSave by mutableStateOf(prefs.getBoolean("autoSave", true)); private set
+    var autoSaveGb by mutableIntStateOf(prefs.getInt("autoSaveGb", 2)); private set
+    var lastAutoSave by mutableStateOf(prefs.getString("lastAutoSave", null)); private set
+    var autoSaving by mutableStateOf(false); private set
+
+    fun changeAutoSave(on: Boolean, gb: Int = autoSaveGb) {
+        autoSave = on; autoSaveGb = gb
+        prefs.edit().putBoolean("autoSave", on).putInt("autoSaveGb", gb).apply()
+        if (on) viewModelScope.launch { checkStorage() }
+    }
+
+    /** Remembers when a packable part was last opened (automatic saving packs ones you haven't used for a while). */
+    private fun markUsed(id: String) = prefs.edit().putLong("lastUsed.$id", System.currentTimeMillis()).apply()
+
+    /** Free space where DroidSystem lives (KDX's private storage). */
+    fun freeBytes(): Long = runCatching { android.os.StatFs(ctx.filesDir.path).availableBytes }.getOrDefault(Long.MAX_VALUE)
+
+    private fun packInUse(id: String) = when (id) {
+        "plasma" -> windows.any { it.fullscreen && it.app == KApp.LINUXDISPLAY }
+        "windsystem-c" -> windSession != null
+        "flatpak" -> appDisplays.values.any { it.appId != null }
+        else -> false
+    }
+
+    /** If space is low and automatic saving is on: clean up, then pack parts not used lately. */
+    suspend fun checkStorage(force: Boolean = false) {
+        val deb = debian ?: return
+        val threshold = autoSaveGb * 1024L * 1024 * 1024
+        if (autoSaving || (!force && (!autoSave || freeBytes() >= threshold))) return
+        autoSaving = true
+        val r = withContext(Dispatchers.IO) {
+            runCatching {
+                org.kdx.shell.droid.StoragePacker.autoSave(deb, ::freeBytes, threshold,
+                    lastUsed = { id -> prefs.getLong("lastUsed.$id", 0L) }, inUse = { id -> packInUse(id) })
+            }.getOrNull()
+        }
+        autoSaving = false
+        if (r == null) return
+        val names = mapOf("plasma" to "KDE Plasma", "windsystem-c" to "WindSystem's drive C:", "flatpak" to "Flatpak apps")
+        val freed = "%.1f GB".format(r.freedBytes / 1073741824.0)
+        val msg = "Freed $freed: cleaned up" + if (r.packed.isNotEmpty()) " and packed " + r.packed.joinToString(", ") { names[it] ?: it } + " (unpacks when you open it)" else ""
+        val stamp = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date())
+        lastAutoSave = "$stamp – $msg"
+        prefs.edit().putString("lastAutoSave", lastAutoSave).apply()
+        toast("Storage was low. $msg")
+        runCatching {
+            val nm = ctx.getSystemService(android.app.NotificationManager::class.java)
+            nm.createNotificationChannel(android.app.NotificationChannel("storage", "Storage", android.app.NotificationManager.IMPORTANCE_LOW))
+            nm.notify(46, android.app.Notification.Builder(ctx, "storage").setSmallIcon(android.R.drawable.stat_notify_sdcard)
+                .setContentTitle("KDX saved space").setContentText(msg).setStyle(android.app.Notification.BigTextStyle().bigText(msg)).build())
+        }
+    }
+
     /** Runs an installed Flatpak app in its own window, with its name and icon. */
     fun launchFlatpak(id: String) {
+        markUsed("flatpak")
         val runner = flatpakRunner ?: run { toast("Turn on the Linux system first"); return }
         // already open? bring that window forward instead of starting a second copy
         windows.firstOrNull { w -> w.app == KApp.LINUXDISPLAY && w.arg?.removePrefix("app:")?.toIntOrNull()?.let { appDisplays[it]?.appId } == id }
@@ -798,6 +856,8 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         reloadDroid()
         // real KDE Plasma as the desktop: start it (or continue setting it up) when KDX opens
         if (realKde) viewModelScope.launch { delay(2500); runRealKde() }
+        // automatic space saving: a minute after start, then every 30 minutes
+        viewModelScope.launch { delay(60_000); while (true) { checkStorage(); delay(30 * 60_000L) } }
     }
 
     fun reloadApps() {

@@ -466,6 +466,26 @@ private fun StoragePackingSection(state: KdxState) {
             }
             result?.let { Text(it, color = if (it.contains("failed")) c.negative else c.positive, fontSize = 12.sp) }
 
+            // automatic saving
+            Spacer(Modifier.height(6.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Save space automatically when storage is low", color = c.text, fontSize = 14.sp)
+                    Text("Cleans up, then packs parts you haven't opened for 3 days (anything not open, when the phone is " +
+                        "nearly full). Free now: ${humanSize(state.freeBytes())}.", color = c.inactiveText, fontSize = 11.sp)
+                }
+                Switch(state.autoSave, { state.changeAutoSave(it) })
+            }
+            if (state.autoSave) Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("When less than ", color = c.text, fontSize = 13.sp)
+                listOf(1, 2, 5).forEach { gb ->
+                    FilterChip(state.autoSaveGb == gb, { state.changeAutoSave(true, gb) }, label = { Text("$gb GB") }, modifier = Modifier.padding(end = 4.dp))
+                }
+                Text(" is free", color = c.text, fontSize = 13.sp)
+            }
+            if (state.autoSaving) Text("Saving space now…", color = c.text, fontSize = 12.sp)
+            state.lastAutoSave?.let { Text("Last automatic save: $it", color = c.inactiveText, fontSize = 11.sp) }
+
             Spacer(Modifier.height(6.dp))
             Text("Clean up", color = c.text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
             org.kdx.shell.droid.StoragePacker.CLEANUPS.forEach { item ->

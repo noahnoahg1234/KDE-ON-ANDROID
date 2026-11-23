@@ -174,6 +174,11 @@ so it works in two ways:
   - *WindSystem's drive C:*: 1.4 GB became 354 MB.
   - *Flatpak apps*.
 
+  **Automatic saving** is on by default. When free space drops below 2 GB (or 1 or 5 GB), KDX cleans up first.
+  If space is still low, it packs the parts you haven't opened for 3 days, biggest saving first. When the phone
+  is nearly full (under 500 MB), recency doesn't matter, and it never packs something that's open. KDX checks a
+  minute after starting and then every 30 minutes, and a notification says what was done.
+
   A pack is checked before anything is deleted, and it's unpacked automatically when you open KDE Plasma or
   WindSystem, or when any `flatpak` command runs. The `droidsystem-pack` tool does the work, and it also works in
   Konsole.
