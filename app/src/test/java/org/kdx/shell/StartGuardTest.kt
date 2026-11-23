@@ -89,3 +89,24 @@ class StartGuardTest {
         ctl.pause().stop().destroy()
     }
 }
+
+class FreeDisplayTest {
+    /** The crash behind the blinking screen: stale X locks from earlier sessions had used up every display number. */
+    @Test fun staleLocksAreCleared() {
+        val root = kotlin.io.path.createTempDirectory("kdx-root").toFile()
+        val x11 = File(root, "tmp/.X11-unix").apply { mkdirs() }
+        for (n in 2..63) { File(root, "tmp/.X$n-lock").writeText("%10d\n".format(100000 + n)); File(x11, "X$n").writeText("") }
+        val running = setOf(100002, 100003) // displays 2 and 3 still have their server
+        val n = org.kdx.shell.droid.LinuxDisplay.freeDisplay(root, used = setOf(4), alive = { it in running })
+        assertEquals(5, n)
+        assertFalse("stale lock removed", File(root, "tmp/.X5-lock").exists())
+        assertFalse(File(x11, "X5").exists())
+        assertTrue("live server's lock kept", File(root, "tmp/.X2-lock").exists())
+        for (k in 2..63) File(root, "tmp/.X$k-lock").writeText("1")
+        assertNull("every display really in use → null, not a crash",
+            org.kdx.shell.droid.LinuxDisplay.freeDisplay(root, used = emptySet(), alive = { true }))
+        File(root, "tmp/.X5-lock").writeText("garbage")
+        assertEquals("unreadable lock = stale", 5, org.kdx.shell.droid.LinuxDisplay.freeDisplay(root, used = (2..4).toSet(), alive = { true }))
+        root.deleteRecursively()
+    }
+}

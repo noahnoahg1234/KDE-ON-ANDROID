@@ -329,7 +329,8 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     private fun openAppWindow(title: String, icon: File?, start: (org.kdx.shell.droid.LinuxDisplay) -> Process) {
         val deb = debian ?: run { toast("Turn on the Linux system (DroidSystem) in System Settings first"); return }
         if (!displaySetUp(deb)) return
-        val n = (2..63).first { !appDisplays.containsKey(it) && !File(deb.root, "tmp/.X$it-lock").exists() }
+        val n = org.kdx.shell.droid.LinuxDisplay.freeDisplay(deb.root, appDisplays.keys.toSet())
+            ?: run { toast("Too many Linux windows are open – close some first"); return }
         val disp = org.kdx.shell.droid.LinuxDisplay(deb, n, appMode = true)
         appDisplays[n] = disp
         org.kdx.shell.droid.LinuxAppsService.update(ctx, appDisplays.size)
@@ -433,7 +434,16 @@ class KdxState(app: Application) : AndroidViewModel(app) {
                         realKdeStep = "Installing KDE Plasma in Konsole (about 320 MB). Keep KDX open."
                         if (!plasmaSetupOpened) { plasmaSetupOpened = true; open(KApp.KONSOLE, "plasma-setup") }
                     }
-                    else -> { realKdeStep = null; if (windows.none { it.fullscreen }) launchPlasma(); return@launch }
+                    else -> {
+                        realKdeStep = null
+                        // a problem starting Plasma must never crash KDX: as the home screen, Android would restart it,
+                        // it would start Plasma again… (the screen blinking black)
+                        if (windows.none { it.fullscreen }) runCatching { launchPlasma() }.onFailure {
+                            StartGuard.log(ctx, "Starting KDE Plasma failed: $it")
+                            realKdeStep = "Couldn't start KDE Plasma: ${it.message ?: it}. Try again below."
+                        }
+                        return@launch
+                    }
                 }
                 delay(3000)
             }
@@ -469,7 +479,8 @@ class KdxState(app: Application) : AndroidViewModel(app) {
             toast("Installing KDE Plasma first (about 320 MB)…")
             open(KApp.KONSOLE, "plasma-setup"); return
         }
-        val n = (2..63).first { !appDisplays.containsKey(it) && !File(deb.root, "tmp/.X$it-lock").exists() }
+        val n = org.kdx.shell.droid.LinuxDisplay.freeDisplay(deb.root, appDisplays.keys.toSet())
+            ?: run { toast("Too many Linux windows are open – close some first"); return }
         val disp = org.kdx.shell.droid.LinuxDisplay(deb, n, desktop = true)
         appDisplays[n] = disp
         org.kdx.shell.droid.LinuxAppsService.update(ctx, appDisplays.size)
@@ -598,7 +609,8 @@ class KdxState(app: Application) : AndroidViewModel(app) {
             toast("Installing WindSystem first…")
             open(KApp.KONSOLE, "windsystem-setup"); return
         }
-        val n = (2..63).first { !appDisplays.containsKey(it) && !File(deb.root, "tmp/.X$it-lock").exists() }
+        val n = org.kdx.shell.droid.LinuxDisplay.freeDisplay(deb.root, appDisplays.keys.toSet())
+            ?: run { toast("Too many Linux windows are open – close some first"); return }
         val disp = org.kdx.shell.droid.LinuxDisplay(deb, n, desktop = true)
         appDisplays[n] = disp
         org.kdx.shell.droid.LinuxAppsService.update(ctx, appDisplays.size)

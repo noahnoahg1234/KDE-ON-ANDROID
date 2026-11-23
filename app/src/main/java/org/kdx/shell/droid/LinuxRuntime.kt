@@ -171,10 +171,42 @@ class LinuxDisplay(
         appProcess?.destroy(); wm?.destroy(); server?.destroy()
         appProcess = null; wm = null; server = null
         runCatching { Procs.killEnv("KDX_TAG=$tag") }
+        // the server is gone: free its display number (see freeDisplay)
+        File(sys.root, "tmp/.X11-unix/X$display").delete(); File(sys.root, "tmp/.X$display-lock").delete()
         tag = "d$display-${System.nanoTime()}" // fresh tag for a restart on this display
     }
 
     companion object {
+        /**
+         * A free X display number for a new window (2–63), or null if every one is really in use.
+         *
+         * X marks a display as taken with /tmp/.X<n>-lock (holding the server's PID) and /tmp/.X11-unix/X<n>. When KDX
+         * crashes or Android ends it, those stay behind; never cleaning them up used every number in the end, and
+         * then KDX crashed each time it started KDE Plasma (the screen blinking black). So locks whose process is gone
+         * (or isn't a DroidSystem program any more – PIDs get reused) are removed first.
+         */
+        fun freeDisplay(root: File, used: Set<Int>, alive: (Int) -> Boolean = ::isDroidProcess): Int? {
+            for (n in 2..63) {
+                if (n in used) continue
+                val lock = File(root, "tmp/.X$n-lock")
+                if (lock.exists()) {
+                    val pid = runCatching { lock.readText().trim().toInt() }.getOrNull()
+                    if (pid != null && alive(pid)) continue
+                    lock.delete(); File(root, "tmp/.X11-unix/X$n").delete()
+                    if (lock.exists()) continue
+                }
+                return n
+            }
+            return null
+        }
+
+        /** True if [pid] is running and is a DroidSystem program (they all carry HOSTNAME=droidsystem). */
+        fun isDroidProcess(pid: Int): Boolean {
+            if (!File("/proc/$pid").exists()) return false
+            val env = runCatching { String(File("/proc/$pid/environ").readBytes()) }.getOrNull() ?: return true // can't tell: assume in use
+            return env.split('\u0000').any { it == "HOSTNAME=droidsystem" }
+        }
+
         /** Openbox config for app windows: no decorations, normal windows maximized (see DebianSystem.applyDroidLayer). */
         const val APP_RC = "etc/xdg/openbox/kdx-app.xml"
         const val SESSION_BUS = "unix:abstract=/kdx/dbus-session"
