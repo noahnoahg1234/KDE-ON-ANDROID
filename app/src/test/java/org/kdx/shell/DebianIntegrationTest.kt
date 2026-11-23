@@ -837,4 +837,37 @@ class DebianIntegrationTest {
             s.shutdown()
         } finally { d.stop() }
     }
+
+    /** Storage packing: scan, clean up, pack and unpack WindSystem's drive C: and KDE Plasma – nothing lost. */
+    @Test fun zb_storagePacking() {
+        assumeTrue(work != null && sys.isInstalled && System.getProperty("kdx.pack") != null)
+        val P = org.kdx.shell.droid.StoragePacker
+        P.ensureTool(sys)
+        fun mb(b: Long?) = "%.0f MB".format((b ?: 0) / 1048576.0)
+        val before = P.scan(sys)
+        println("scan: " + before.entries.joinToString { "${it.key}=${mb(it.value)}" })
+        assertEquals(0, sys.run(P.CLEANUPS.first { it.id == "apt-cache" }.command, ::log))
+        val ids = System.getProperty("kdx.pack").split(',')
+        for (id in ids) {
+            val sum = { sys.query(when (id) {
+                "plasma" -> "droidsystem-pack size plasma; md5sum /usr/bin/plasmashell 2>&1"
+                else -> "cd ${org.kdx.shell.droid.WindSystem.PREFIX} 2>/dev/null && find . -type f -print0 | sort -z | xargs -0 md5sum | md5sum"
+            }).second.trim() }
+            val orig = sum()
+            val t0 = System.currentTimeMillis()
+            assertEquals(0, sys.run("droidsystem-pack pack $id", ::log))
+            println("$id: ${mb(before["pack:$id"])} → packed ${mb(P.packedSize(sys, id))} in ${(System.currentTimeMillis() - t0) / 1000} s")
+            assertTrue(P.isPacked(sys, id))
+            if (id == "plasma") {
+                assertFalse("plasmashell is packed away", sys.hasCommand("usr/bin/plasmashell"))
+                println("held while packed: " + sys.query("apt-mark showhold | wc -l").second.trim())
+            } else assertFalse(File(sys.root, org.kdx.shell.droid.WindSystem.PREFIX.removePrefix("/")).exists())
+            val t1 = System.currentTimeMillis()
+            assertEquals(0, sys.run("droidsystem-pack unpack $id", ::log))
+            println("$id unpacked in ${(System.currentTimeMillis() - t1) / 1000} s")
+            assertFalse(P.isPacked(sys, id))
+            assertEquals("everything back exactly", orig, sum())
+            if (id == "plasma") assertEquals("no holds left", "0", sys.query("apt-mark showhold | wc -l").second.trim())
+        }
+    }
 }

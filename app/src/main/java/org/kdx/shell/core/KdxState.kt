@@ -491,6 +491,10 @@ class KdxState(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.IO) {
                     awaitLinuxCleanup()
                     ensureSound()
+                    if (org.kdx.shell.droid.StoragePacker.isPacked(deb, "plasma")) {
+                        withContext(Dispatchers.Main) { toast("Unpacking KDE Plasma (it was packed to save space)…") }
+                        deb.run("droidsystem-pack unpack plasma </dev/null 2>&1; true")
+                    }
                     org.kdx.shell.droid.KdePlasma.writeDefaults(deb)
                     runCatching { org.kdx.shell.droid.LinuxLauncher.installWrapper(deb) } // Flatpak apps from Plasma's menu
                     disp.start(xw, xh)

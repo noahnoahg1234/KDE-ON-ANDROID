@@ -263,6 +263,7 @@ class DebianSystem(
             |""".trimMargin())
         tool("bazaar-setup", KdePlasma.bazaarSetupScript())
         tool("windsystem-setup", WindSystem.setupScript())
+        tool("droidsystem-pack", StoragePacker.toolScript())
         File(root, WindSystem.OPENBOX_RC).apply { parentFile?.mkdirs() }.writeText(WindSystem.OPENBOX_XML)
         tool("display-setup", """#!/bin/sh
             |# Installs the X display server used by KDX's Linux Display window.
@@ -335,7 +336,7 @@ class DebianSystem(
 
     companion object {
         /** Bump when applyDroidLayer changes. 2: app-window Openbox config, xdotool/dbus in display-setup. */
-        const val LAYER_VERSION = 9 // 3: bwrap stand-in, 4: sound, 5: plasma-setup, 6: dpkg excludes, 7: bazaar-setup, 8: windsystem
+        const val LAYER_VERSION = 10 // 10: droidsystem-pack; 3: bwrap stand-in, 4: sound, 5: plasma-setup, 6: dpkg excludes, 7: bazaar-setup, 8: windsystem
 
         val DPKG_CONFIG = """force-unsafe-io
             |path-exclude=/usr/share/locale/*

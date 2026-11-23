@@ -163,6 +163,21 @@ X apps only understand a mouse, so touches are translated (`TouchTranslator`):
   Ctrl/Alt/Super shortcuts work, and AltGr characters (@, €…) come out right. The on-screen keyboard stays down
   while a hardware keyboard is connected.
 
+## Storage packing
+System Settings → **Storage packing** frees space in DroidSystem. Android has no compressed file systems for apps,
+so it works in two ways:
+- **Clean up** deletes what's safe to delete: downloaded package files, package lists (fetched again before the
+  next install), translations, manuals and docs left by older installs, caches, old logs, and unused Flatpak
+  runtimes.
+- **Packs** compress big parts you don't use all the time into one archive (zstd, or xz) and remove the files:
+  - *KDE Plasma*: the packages only Plasma needs, held in apt while packed. 755 MB became 266 MB in testing.
+  - *WindSystem's drive C:*: 1.4 GB became 354 MB.
+  - *Flatpak apps*.
+
+  A pack is checked before anything is deleted, and it's unpacked automatically when you open KDE Plasma or
+  WindSystem, or when any `flatpak` command runs. The `droidsystem-pack` tool does the work, and it also works in
+  Konsole.
+
 ## Real KDE Plasma
 KDX's own shell is an Android look-alike, but DroidSystem 2 can also run the **real KDE Plasma 6** from Debian:
 KWin, plasmashell with the real panel, Kickoff and system tray, plus Dolphin, Konsole, Kate, Okular, Gwenview, Ark,

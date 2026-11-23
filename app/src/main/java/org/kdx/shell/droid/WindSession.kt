@@ -36,6 +36,10 @@ class WindSession(
             .writeText(WindSystem.dosboxConfig(File(shared, "DOS").absolutePath))
         if (!WindSystem.dosboxInstalled(sys)) installDosbox()
         display.launch("openbox --config-file /${WindSystem.OPENBOX_RC}")
+        if (StoragePacker.isPacked(sys, "windsystem-c")) {
+            status("Unpacking drive C: (it was packed to save space)…")
+            sys.run("droidsystem-pack unpack windsystem-c </dev/null >/dev/null 2>&1; true")
+        }
         val prefix = File(sys.root, WindSystem.PREFIX.removePrefix("/"))
         // a complete drive C: has its registry and the Windows folder
         val firstRun = !(File(prefix, "system.reg").isFile && File(prefix, "drive_c/windows/system32").isDirectory)

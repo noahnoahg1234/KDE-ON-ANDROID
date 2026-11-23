@@ -262,6 +262,7 @@ fun SystemSettings(state: KdxState, w: KWindow) {
     Column(Modifier.fillMaxSize().background(c.window).verticalScroll(scroll)) {
         RealKdeSection(state)
         LinuxSystemSection(state)
+        if (state.debian != null) StoragePackingSection(state)
         Section("Wallpaper", Icons.Filled.Wallpaper) {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Wallpapers.forEachIndexed { i, wp ->
@@ -413,6 +414,94 @@ private fun RealKdeSection(state: KdxState) {
             modifier = Modifier.padding(top = 4.dp))
         Text("In Plasma, the small K button in the top corner takes you back to KDX. Plasma needs about 800 MB of RAM.",
             color = c.inactiveText, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+/**
+ * System Settings → Storage packing: frees space in DroidSystem by cleaning up what's safe to delete, and by packing
+ * big parts that aren't used all the time into compressed archives (unpacked automatically when opened).
+ */
+@Composable
+private fun StoragePackingSection(state: KdxState) {
+    val c = LocalBreeze.current
+    val deb = state.debian ?: return
+    val scope = rememberCoroutineScope()
+    var refresh by remember { mutableIntStateOf(0) }
+    var busy by remember { mutableStateOf<String?>(null) }
+    var result by remember { mutableStateOf<String?>(null) }
+    val sizes by produceState<Map<String, Long>?>(null, refresh) {
+        value = null
+        value = withContext(Dispatchers.IO) {
+            org.kdx.shell.droid.StoragePacker.ensureTool(deb)
+            runCatching { org.kdx.shell.droid.StoragePacker.scan(deb) }.getOrDefault(emptyMap())
+        }
+    }
+    fun job(label: String, cmd: String) {
+        if (busy != null) return
+        busy = label; result = null
+        scope.launch {
+            val before = sizes?.get("total") ?: 0L
+            val out = StringBuilder()
+            val rc = withContext(Dispatchers.IO) { runCatching { deb.run("$cmd </dev/null 2>&1", { out.appendLine(it) }) }.getOrDefault(-1) }
+            busy = null
+            refresh++
+            result = if (rc == 0) "$label: done." else "$label failed (code $rc): " + out.lines().filter { it.isNotBlank() }.takeLast(3).joinToString(" ")
+            if (before > 0) state.toast("$label finished")
+        }
+    }
+    Section("Storage packing", Icons.Filled.Compress) {
+        Text("Frees space in DroidSystem. Clean up removes things that are safe to delete. Packing compresses big parts " +
+            "you don't use all the time into one archive – they're unpacked automatically when you open them again " +
+            "(that takes a moment).", color = c.inactiveText, fontSize = 13.sp)
+        val s = sizes
+        if (s == null) Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Text("  Measuring…", color = c.text, fontSize = 13.sp)
+        } else {
+            s["total"]?.let { KV("DroidSystem uses", humanSize(it)) }
+            busy?.let { b ->
+                Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Text("  $b… keep KDX open (packing a lot can take several minutes).", color = c.text, fontSize = 13.sp)
+                }
+            }
+            result?.let { Text(it, color = if (it.contains("failed")) c.negative else c.positive, fontSize = 12.sp) }
+
+            Spacer(Modifier.height(6.dp))
+            Text("Clean up", color = c.text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            org.kdx.shell.droid.StoragePacker.CLEANUPS.forEach { item ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(item.title + (s[item.id]?.let { "  ·  " + humanSize(it) } ?: ""), color = c.text, fontSize = 14.sp)
+                        Text(item.description, color = c.inactiveText, fontSize = 11.sp)
+                    }
+                    TextButton({ job("Cleaning ${item.title.lowercase()}", item.command) }, enabled = busy == null) { Text("Clean") }
+                }
+            }
+            OutlinedButton({ job("Cleaning up", org.kdx.shell.droid.StoragePacker.CLEANUPS.joinToString("; ") { it.command }) },
+                enabled = busy == null) { Text("Clean everything") }
+
+            Spacer(Modifier.height(10.dp))
+            Text("Packs", color = c.text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            org.kdx.shell.droid.StoragePacker.PACKS.forEach { p ->
+                val packed = org.kdx.shell.droid.StoragePacker.isPacked(deb, p.id)
+                val current = s["pack:${p.id}"] ?: 0L
+                if (!packed && current < 1_000_000) return@forEach // not installed / nearly empty
+                val inUse = when (p.id) {
+                    "plasma" -> state.windows.any { it.fullscreen && it.app == org.kdx.shell.core.KApp.LINUXDISPLAY }
+                    "windsystem-c" -> state.windSession != null
+                    else -> false
+                }
+                Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(p.title + "  ·  " + if (packed) "packed, ${humanSize(org.kdx.shell.droid.StoragePacker.packedSize(deb, p.id))}" else humanSize(current),
+                            color = c.text, fontSize = 14.sp)
+                        Text(if (inUse) "Close it first to pack it." else p.description, color = c.inactiveText, fontSize = 11.sp)
+                    }
+                    if (packed) TextButton({ job("Unpacking ${p.title}", "droidsystem-pack unpack ${p.id}") }, enabled = busy == null) { Text("Unpack") }
+                    else TextButton({ job("Packing ${p.title}", "droidsystem-pack pack ${p.id}") }, enabled = busy == null && !inUse) { Text("Pack") }
+                }
+            }
+        }
     }
 }
 

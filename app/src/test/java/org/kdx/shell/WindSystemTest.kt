@@ -88,4 +88,14 @@ class WindSystemTest {
         assertTrue(WindSystem.BUILTIN.any { it.name == "DOSBox-X" && it.native })
         assertTrue("DOS" in WindSystem.FOLDERS)
     }
+
+    @Test fun storagePackerTool() {
+        val f = java.io.File.createTempFile("droidsystem-pack", ".sh").apply { writeText(org.kdx.shell.droid.StoragePacker.toolScript()) }
+        val p = ProcessBuilder("bash", "-n", f.path).redirectErrorStream(true).start()
+        assertEquals(p.inputStream.bufferedReader().readText(), 0, p.waitFor())
+        f.delete()
+        val ids = org.kdx.shell.droid.StoragePacker.PACKS.map { it.id }
+        assertEquals(listOf("plasma", "windsystem-c", "flatpak"), ids)
+        assertTrue(org.kdx.shell.droid.LinuxLauncher.WRAPPER.contains("droidsystem-pack unpack flatpak"))
+    }
 }

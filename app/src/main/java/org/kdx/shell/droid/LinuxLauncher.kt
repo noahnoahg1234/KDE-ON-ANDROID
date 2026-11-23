@@ -80,6 +80,10 @@ class LinuxLauncher(val sys: DebianSystem, private val onRun: (Request) -> Strin
 # Flatpak's sandbox (bubblewrap) can't run under proot, so "flatpak run" asks KDX to start the app its own way.
 # Everything else goes to the real flatpak.
 REAL=/usr/bin/flatpak.real
+# Flatpak apps packed to save space (System Settings → Storage packing): unpack them first
+if ls /var/lib/droidsystem/packs/flatpak.tar.* >/dev/null 2>&1 && command -v droidsystem-pack >/dev/null; then
+  droidsystem-pack unpack flatpak >&2
+fi
 [ "${'$'}1" = run ] && [ -r /$INFO ] || exec "${'$'}REAL" "${'$'}@"
 orig=("${'$'}@"); shift
 cmd=; id=
