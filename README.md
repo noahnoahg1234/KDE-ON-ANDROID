@@ -278,6 +278,14 @@ on. Every app's traffic goes through **Tor** (free, no account, built in) or thr
 
 Tor is slower than a paid VPN and some sites block it. Signing in to a site still tells it who you are.
 
+## If the screen keeps blinking black (safe mode)
+
+KDX is the home screen, so when it dies Android starts it again right away – that looks like the screen blinking
+black. If KDX starts 3 times within 3 minutes, it starts in **safe mode**: nothing heavy starts by itself (real KDE
+Plasma, WindSystem, automatic space saving), which breaks the loop. A banner says why KDX kept ending (a crash – KDX
+saves the details – or, on Android 11+, what Android says, e.g. low memory). **Copy details** copies the report;
+**Resume** turns things back on. After 3 minutes of running fine, KDX forgets the recent starts.
+
 ## Install
 Download `app-release.apk` from the latest **Build KDX** run in GitHub Actions (artifact `KDX-apk`) and install it.
 To use KDX as your home screen: *Kickoff → Leave → Default Home App*, then choose **KDX**.

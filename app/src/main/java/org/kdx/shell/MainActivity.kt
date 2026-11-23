@@ -19,6 +19,7 @@ class MainActivity : ComponentActivity() {
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener { readClip() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        org.kdx.shell.core.StartGuard.installCrashRecorder(this)
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {

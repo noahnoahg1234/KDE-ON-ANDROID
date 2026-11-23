@@ -851,13 +851,47 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     var fileClipboard by mutableStateOf<List<File>>(emptyList())
     var fileClipboardCut by mutableStateOf(false)
 
+    // ---- restart-loop guard (see StartGuard) ----
+    /** KDX kept restarting: nothing heavy starts by itself until the user resumes. */
+    var safeMode by mutableStateOf(false); private set
+    var safeModeDetails by mutableStateOf(""); private set
+
+    private fun checkStartLoop() {
+        val starts = StartGuard.recordStart(prefs)
+        if (StartGuard.isLoop(starts, System.currentTimeMillis())) {
+            safeMode = true
+            val reasons = StartGuard.recentExitReasons(ctx)
+            val crash = runCatching { StartGuard.crashFile(ctx).takeIf { it.isFile }?.readText() }.getOrNull()
+            safeModeDetails = buildString {
+                appendLine("KDX started ${starts.size} times in ${StartGuard.LOOP_WINDOW_MS / 60_000} minutes.")
+                if (reasons.isNotEmpty()) { appendLine(); appendLine("What Android says:"); reasons.forEach { appendLine("• $it") } }
+                if (crash != null) { appendLine(); appendLine(crash.take(4000)) }
+                appendLine(); append("KDE Plasma auto-start: ${if (realKde) "on" else "off"}; WindSystem/Linux apps open before: ${prefs.getBoolean("droid", false)}")
+            }
+        }
+        // running fine for a while: not a loop
+        viewModelScope.launch { delay(StartGuard.LOOP_WINDOW_MS); StartGuard.markStable(prefs) }
+    }
+
+    /** For tests: show the safe-mode notice with [details]. */
+    internal fun enterSafeModeForTest(details: String) { safeModeDetails = details; safeMode = true }
+
+    /** The user saw the safe-mode notice and wants things back to normal. */
+    fun leaveSafeMode() {
+        safeMode = false
+        StartGuard.markStable(prefs)
+        runCatching { StartGuard.crashFile(ctx).delete() }
+        if (realKde) runRealKde()
+    }
+
     init {
+        checkStartLoop()
         reloadApps()
         reloadDroid()
         // real KDE Plasma as the desktop: start it (or continue setting it up) when KDX opens
-        if (realKde) viewModelScope.launch { delay(2500); runRealKde() }
-        // automatic space saving: a minute after start, then every 30 minutes
-        viewModelScope.launch { delay(60_000); while (true) { checkStorage(); delay(30 * 60_000L) } }
+        if (realKde && !safeMode) viewModelScope.launch { delay(2500); runRealKde() }
+        // automatic space saving: a minute after start, then every 30 minutes (not in safe mode)
+        viewModelScope.launch { delay(60_000); while (true) { if (!safeMode) checkStorage(); delay(30 * 60_000L) } }
     }
 
     fun reloadApps() {

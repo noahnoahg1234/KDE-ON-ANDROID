@@ -246,6 +246,16 @@ class ShellScreenshotTest {
         rule.onNodeWithText("Untitled - Notepad").assertExists()
     }
 
+    @Test fun safeModeBanner() {
+        rule.runOnUiThread { state.enterSafeModeForTest("KDX started 3 times in 3 minutes.\n\nWhat Android says:\n• 14:02: Android ended KDX because the phone was low on memory, using 1450 MB") }
+        rule.mainClock.advanceTimeBy(800)
+        shot("74-safe-mode")
+        rule.onNodeWithText("KDX kept restarting").assertExists()
+        rule.onNodeWithText("Resume").performClick()
+        rule.mainClock.advanceTimeBy(500)
+        assertTrue(!state.safeMode)
+    }
+
     @Test fun privacyVpnPage() {
         rule.runOnUiThread { state.open(KApp.PRIVACY) }
         rule.mainClock.advanceTimeBy(2000); Thread.sleep(500); rule.mainClock.advanceTimeBy(500)

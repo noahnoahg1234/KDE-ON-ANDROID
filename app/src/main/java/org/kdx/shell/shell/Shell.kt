@@ -8,6 +8,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -76,6 +79,31 @@ fun Shell(state: KdxState) {
             Overview(state)
         }
         FullscreenLayer(state)
+        if (state.safeMode) SafeModeBanner(state, Modifier.align(Alignment.TopCenter).statusBarsPadding())
+    }
+}
+
+/** KDX kept restarting (the screen blinking black): say so, why, and offer to resume. */
+@Composable
+private fun SafeModeBanner(state: KdxState, modifier: Modifier) {
+    val c = org.kdx.shell.core.LocalBreeze.current
+    var details by remember { mutableStateOf(false) }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    Column(modifier.padding(10.dp).widthIn(max = 560.dp)
+        .background(c.window, androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+        .border(1.dp, c.neutral, androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).padding(14.dp)) {
+        Text("KDX kept restarting", color = c.text, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        Text("That's the screen blinking black. To stop it, nothing heavy starts by itself right now (KDE Plasma, " +
+            "WindSystem, automatic space saving). " +
+            (state.safeModeDetails.lines().firstOrNull { it.startsWith("•") }?.removePrefix("• ") ?: ""),
+            color = c.inactiveText, fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp))
+        if (details) Text(state.safeModeDetails, color = c.text, fontSize = androidx.compose.ui.unit.TextUnit(11f, androidx.compose.ui.unit.TextUnitType.Sp),
+            modifier = Modifier.padding(top = 6.dp).heightIn(max = 260.dp).verticalScroll(rememberScrollState()))
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.End) {
+            androidx.compose.material3.TextButton({ details = !details }) { Text(if (details) "Hide details" else "Details") }
+            androidx.compose.material3.TextButton({ clipboard.setText(androidx.compose.ui.text.AnnotatedString(state.safeModeDetails)); state.toast("Copied") }) { Text("Copy details") }
+            androidx.compose.material3.Button({ state.leaveSafeMode() }) { Text("Resume") }
+        }
     }
 }
 
