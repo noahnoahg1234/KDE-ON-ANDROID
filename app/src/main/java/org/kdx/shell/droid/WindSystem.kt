@@ -29,7 +29,7 @@ object WindSystem {
     const val WINE = "windsystem-wine"
 
     /** Folders inside Android/WindSystem. */
-    val FOLDERS = listOf("Programs", "Documents", "Crash reports", "Logs")
+    val FOLDERS = listOf("Programs", "DOS", "Documents", "Crash reports", "Logs")
 
     /** The packages / setup script for `windsystem-setup`. */
     fun setupScript(): String = """#!/bin/bash
@@ -43,7 +43,7 @@ case "${'$'}arch" in
     dpkg --add-architecture i386
     apt-get -q update
     apt-get -q install -y --no-install-recommends -o Dpkg::Progress-Fancy=0 wine wine64 wine32:i386 libwine libwine:i386 fonts-wine \
-      winbind xdotool x11-utils openbox fonts-liberation2
+      winbind xdotool x11-utils openbox fonts-liberation2 dosbox-x
     cat > /usr/local/bin/windsystem-wine <<'WRAP'
 ${wineWrapper("amd64")}WRAP
     cat > /usr/local/bin/windsystem-wineserver <<'WRAP'
@@ -53,7 +53,7 @@ ${serverWrapper("amd64")}WRAP
     # Windows programs are x86: box64 translates x86_64 code to ARM; Wine and its libraries are Debian's amd64 packages
     dpkg --add-architecture amd64
     apt-get -q update
-    apt-get -q install -y --no-install-recommends -o Dpkg::Progress-Fancy=0 box64 xdotool x11-utils openbox fonts-liberation2
+    apt-get -q install -y --no-install-recommends -o Dpkg::Progress-Fancy=0 box64 xdotool x11-utils openbox fonts-liberation2 dosbox-x
     apt-get -q install -y --no-install-recommends -o Dpkg::Progress-Fancy=0 wine64:amd64 libwine:amd64 fonts-wine
     # Wine starts its server through Debian's /usr/lib/wine/wineserver *shell script*, which runs wineserver64 directly –
     # an x86_64 program the phone can't run, and box64 can't step in from a script. So wineserver64 itself becomes a
@@ -74,6 +74,8 @@ ${serverWrapper("arm64")}WRAP
     echo "WindSystem needs an x86_64 or ARM64 device (this one is ${'$'}arch)."; exit 1 ;;
 esac
 chmod +x /usr/local/bin/windsystem-wine /usr/local/bin/windsystem-wineserver
+# Wine hands DOS programs to "dosbox": that's DOSBox-X here
+[ -e /usr/local/bin/dosbox ] || ln -s /usr/bin/dosbox-x /usr/local/bin/dosbox
 echo "Checking that Wine starts on this device…"
 if ! out=${'$'}(timeout 180 /usr/local/bin/windsystem-wine --version 2>&1); then
   echo "${'$'}out" | tail -25
@@ -155,6 +157,50 @@ exec box64 /usr/lib/wine/wineserver64.x86 "${'$'}@"
         val w = a.toIntOrNull() ?: return null; val h = b.toIntOrNull() ?: return null
         (w / 8 * 8).coerceIn(640, 3840) to h.coerceIn(400, 2160)
     }
+
+    // ---- DOSBox-X: DOS programs and games (native on ARM and x86, no box64) ----
+
+    fun dosboxInstalled(sys: DebianSystem) = sys.hasCommand("usr/bin/dosbox-x")
+
+    /** WindSystem's DOSBox-X settings (inside DroidSystem). */
+    const val DOSBOX_CONF = "/root/.config/dosbox-x/windsystem.conf"
+
+    /** DOS programs in Android/WindSystem/DOS run with that folder as drive C:. */
+    fun dosboxConfig(dosFolder: String) = """# WindSystem's DOSBox-X settings (rewritten when WindSystem starts)
+[sdl]
+fullscreen=false
+output=surface
+autolock=false
+showmenu=true
+windowresolution=1024x768
+
+[dosbox]
+machine=svga_s3
+memsize=16
+title=DOSBox-X
+startbanner=false
+
+[render]
+aspect=true
+scaler=none
+
+[cpu]
+core=auto
+cputype=auto
+cycles=auto
+
+[mixer]
+rate=44100
+
+[autoexec]
+@echo off
+mount c "$dosFolder"
+c:
+echo Your DOS folder (Android/WindSystem/DOS) is drive C:.
+"""
+
+    /** Debian package for [dosboxInstalled] (installed with WindSystem, or in the background for older installs). */
+    const val DOSBOX_INSTALL = "apt-get -q install -y --no-install-recommends dosbox-x </dev/null && { [ -e /usr/local/bin/dosbox ] || ln -s /usr/bin/dosbox-x /usr/local/bin/dosbox; }"
 
     /** Windows versions Wine can report to programs. */
     val WINDOWS_VERSIONS = listOf("win10" to "Windows 10", "win11" to "Windows 11", "win81" to "Windows 8.1", "win7" to "Windows 7", "winxp64" to "Windows XP")
@@ -260,7 +306,8 @@ exec box64 /usr/lib/wine/wineserver64.x86 "${'$'}@"
     """.trimIndent()
 
     /** A program in the start menu. */
-    data class Program(val name: String, val command: List<String>, val icon: File? = null, val builtin: Boolean = false, val category: String = "")
+    /** A start-menu entry. [native] programs (DOSBox-X) run directly, everything else through Wine. */
+    data class Program(val name: String, val command: List<String>, val icon: File? = null, val builtin: Boolean = false, val category: String = "", val native: Boolean = false)
 
     /** Windows tools that come with Wine. */
     val BUILTIN = listOf(
@@ -276,6 +323,7 @@ exec box64 /usr/lib/wine/wineserver64.x86 "${'$'}@"
         Program("Add or Remove Programs", listOf("uninstaller"), builtin = true, category = "Windows tools"),
         Program("Internet Explorer", listOf("iexplore"), builtin = true, category = "Windows accessories"),
         Program("Calculator", listOf("winecalc"), builtin = true, category = "Windows accessories"),
+        Program("DOSBox-X", listOf("dosbox-x", "-conf", DOSBOX_CONF), builtin = true, category = "DOS", native = true),
     )
 
     /**
@@ -304,6 +352,14 @@ exec box64 /usr/lib/wine/wineserver64.x86 "${'$'}@"
                 out += Program(f.nameWithoutExtension, when (f.extension.lowercase()) {
                     "msi" -> listOf("msiexec", "/i", unix); "bat" -> listOf("start", "/unix", unix); else -> listOf(unix) },
                     category = "Programs folder")
+            }
+        // DOS programs: Android/WindSystem/DOS (and its folders, one level deep) → DOSBox-X
+        val dos = sharedHost.resolve("DOS")
+        dos.walkTopDown().maxDepth(2).filter { it.isFile && it.extension.lowercase() in setOf("exe", "com", "bat") }
+            .sortedBy { it.path.lowercase() }.take(200).forEach { f ->
+                val name = if (f.parentFile != dos) "${f.parentFile.name} – ${f.nameWithoutExtension}" else f.nameWithoutExtension
+                out += Program(name, listOf("dosbox-x", "-conf", DOSBOX_CONF, "${sharedHostToGuest(sharedHost)}/DOS/${f.relativeTo(dos).path}"),
+                    category = "DOS programs", native = true)
             }
         return out.distinctBy { it.name.lowercase() }
     }

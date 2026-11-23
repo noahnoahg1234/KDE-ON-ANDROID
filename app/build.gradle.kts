@@ -28,8 +28,8 @@ android {
         // Android 9 target, like Termux: apps targeting 10+ may not execute programs they download,
         // which DroidSystem needs to run Debian's Linux programs (via proot). Install by sideloading.
         targetSdk = 28
-        versionCode = 31
-        versionName = "3.5.5"
+        versionCode = 32
+        versionName = "3.6.0"
         // proot is bundled for these CPUs (see app/src/main/jniLibs)
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
     }

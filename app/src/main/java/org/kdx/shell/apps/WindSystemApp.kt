@@ -184,6 +184,7 @@ private fun iconFor(p: WindSystem.Program): ImageVector = when (p.command.firstO
     "control" -> Icons.Filled.Tune; "regedit" -> Icons.Filled.AccountTree; "winecfg" -> Icons.Filled.Settings
     "uninstaller" -> Icons.Filled.DeleteSweep; "iexplore" -> Icons.Filled.Public; "winecalc" -> Icons.Filled.Calculate
     "msiexec" -> Icons.Filled.InstallDesktop
+    "dosbox-x" -> Icons.Filled.SportsEsports
     else -> if (p.category == "Programs folder") Icons.Filled.InstallDesktop else Icons.Filled.Apps
 }
 
@@ -222,7 +223,7 @@ private fun StartMenu(
                     MenuRow(wc, Icons.Filled.PlayArrow, "Run \"$query\"", "Windows command or program path") { close(); s?.let { ss -> state.io { ss.runLine(query) } } }
                 }
                 if (query.isBlank() && installed.isEmpty()) item {
-                    Text("Put Windows installers (.exe, .msi) in ${state.windSharedDir().path}/Programs – they appear here.",
+                    Text("Put Windows installers (.exe, .msi) in ${state.windSharedDir().path}/Programs, and DOS games/programs in its DOS folder – they appear here.",
                         color = wc.dim, fontSize = 12.sp, modifier = Modifier.padding(6.dp))
                 }
                 val groups = results.groupBy { it.category.ifEmpty { "Programs" } }

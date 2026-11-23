@@ -216,6 +216,9 @@ Windows itself isn't included: Wine provides the Windows APIs and tells programs
   restores it, and the buttons minimize, maximize and close. WindSystem uses mouse-style touch (drag = drag, hold =
   right-click, two fingers scroll), and title bars, window buttons, borders, menus and scrollbars are sized for
   fingers.
+- **DOSBox-X** comes with WindSystem (older installs get it in the background on their next start). It runs
+  natively, without box64. DOS games and programs in **Android/WindSystem/DOS** appear in the start menu under
+  *DOS programs* and run with that folder as drive C:. Wine also hands DOS programs to DOSBox-X.
 - **Crash handler:** a crashed program shows what happened (Wine's exception and winedbg's backtrace), and a report
   is saved to *Crash reports*. You can restart it there, and optionally it restarts automatically. Every program's
   output goes to *Logs*.

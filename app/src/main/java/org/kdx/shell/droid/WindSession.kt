@@ -20,6 +20,7 @@ class WindSession(
     private val status: (String?) -> Unit,
 ) {
     private val running = ConcurrentHashMap<Process, String>()
+    @Volatile private var stopping = false
     @Volatile private var watcher: Process? = null
     val programCount get() = running.size
 
@@ -31,6 +32,9 @@ class WindSession(
         WindSystem.ensureWrappers(sys)
         sys.run("xsetroot -solid '#%06x' 2>/dev/null; true".format(config.wallpaper and 0xFFFFFF), env = display.env)
         File(sys.root, WindSystem.OPENBOX_RC).apply { parentFile?.mkdirs() }.writeText(WindSystem.OPENBOX_XML) // current config, also on older installs
+        File(sys.root, WindSystem.DOSBOX_CONF.removePrefix("/")).apply { parentFile?.mkdirs() }
+            .writeText(WindSystem.dosboxConfig(File(shared, "DOS").absolutePath))
+        if (!WindSystem.dosboxInstalled(sys)) installDosbox()
         display.launch("openbox --config-file /${WindSystem.OPENBOX_RC}")
         val prefix = File(sys.root, WindSystem.PREFIX.removePrefix("/"))
         // a complete drive C: has its registry and the Windows folder
@@ -67,6 +71,22 @@ class WindSession(
 
     private fun log(line: String) = runCatching { File(shared, "Logs/WindSystem.log").appendText(line + "\n") }
 
+    /** WindSystems installed before DOSBox-X came with it: install it in the background (WindSystem starts meanwhile). */
+    @Volatile var dosboxInstalling = false; private set
+    private fun installDosbox() {
+        if (dosboxInstalling) return
+        dosboxInstalling = true
+        Thread({
+            val logFile = File(shared, "Logs/DOSBox-X install.log")
+            runCatching {
+                logFile.writeText("Installing DOSBox-X – ${java.util.Date()}\n")
+                val rc = sys.run("apt-get -q update </dev/null >/dev/null 2>&1; " + WindSystem.DOSBOX_INSTALL, { l -> runCatching { logFile.appendText(l + "\n") } })
+                log(if (rc == 0) "DOSBox-X installed" else "DOSBox-X couldn't be installed (code $rc) – see Logs/DOSBox-X install.log")
+            }
+            dosboxInstalling = false
+        }, "windsystem-dosbox-install").apply { isDaemon = true; start() }
+    }
+
     /** Writes [config] into the registry and drive letters (one regedit run). */
     fun applySettings() {
         val c = config.copy(dpi = if (config.dpi == 0) autoDpi else config.dpi)
@@ -89,7 +109,7 @@ class WindSession(
         val args = p.command.joinToString(" ") { "'" + it.replace("'", "'\\''") + "'" }
         val exe = p.command.firstOrNull { it.startsWith("/") }
         val cd = exe?.let { "cd '" + File(it).parent.replace("'", "'\\''") + "' 2>/dev/null; " } ?: ""
-        val proc = sys.command(listOf("/bin/bash", "-lc", "${cd}exec ${WindSystem.WINE} $args"), "/root", env).start()
+        val proc = sys.command(listOf("/bin/bash", "-lc", "${cd}exec ${if (p.native) "" else WindSystem.WINE + " "}$args"), "/root", env).start()
         proc.outputStream.close()
         running[proc] = p.name
         val log = File(shared, "Logs").apply { mkdirs() }.resolve(p.name.replace(Regex("[^A-Za-z0-9._-]+"), "_") + ".log")
@@ -111,6 +131,7 @@ class WindSession(
             val code = runCatching { proc.waitFor() }.getOrDefault(-1)
             Thread.sleep(800) // let the last lines (winedbg's backtrace) arrive
             running.remove(proc)
+            if (stopping) return@Thread // WindSystem ended it (Shut down / Restart): not a crash
             val crash = WindSystem.parseCrash(p.name, code, lines.toList()) ?: return@Thread
             val report = runCatching {
                 val dir = File(shared, "Crash reports").apply { mkdirs() }
@@ -195,11 +216,12 @@ class WindSession(
 
     /** Ends every Windows program (like shutting down). */
     fun shutdown() {
+        stopping = true
         runCatching { sys.run("windsystem-wineserver -k >/dev/null 2>&1; true", env = env) }
         running.keys.forEach { it.destroy() }
         watcher?.destroy()
     }
 
     /** Restart: end all programs, then start again (prefix, settings, window list). */
-    fun restart() { shutdown(); start() }
+    fun restart() { shutdown(); Thread.sleep(500); stopping = false; start() }
 }

@@ -79,4 +79,13 @@ class WindSystemTest {
         assertTrue(WindSystem.RESOLUTIONS.all { WindSystem.fixedResolution(it) != null })
         assertFalse("Openbox mustn't strip every frame", WindSystem.OPENBOX_XML.contains("<decor>no</decor>"))
     }
+
+    @Test fun dosboxSetup() {
+        assertTrue(WindSystem.setupScript().contains("dosbox-x"))
+        val conf = WindSystem.dosboxConfig("/storage/emulated/0/Android/WindSystem/DOS")
+        assertTrue(conf.contains("mount c \"/storage/emulated/0/Android/WindSystem/DOS\""))
+        assertTrue(conf.contains("output=surface") && conf.contains("autolock=false"))
+        assertTrue(WindSystem.BUILTIN.any { it.name == "DOSBox-X" && it.native })
+        assertTrue("DOS" in WindSystem.FOLDERS)
+    }
 }

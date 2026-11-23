@@ -803,4 +803,38 @@ class DebianIntegrationTest {
             d.stop()
         }
     }
+
+    /** DOSBox-X: installed in the background for older WindSystems, DOS programs in the DOS folder run in it. */
+    @Test fun za_dosbox() {
+        assumeTrue(work != null && sys.isInstalled && System.getProperty("kdx.wind") != null && org.kdx.shell.droid.WindSystem.isInstalled(sys))
+        val shared = File(work, "WindSystem").apply { mkdirs() }
+        // a tiny DOS program: prints a line, waits for a key
+        val msg = "Hello from DOS in WindSystem!$".toByteArray()
+        val code = byteArrayOf(0xB4.toByte(), 0x09, 0xBA.toByte(), 0x0C, 0x01, 0xCD.toByte(), 0x21, 0xB4.toByte(), 0x00, 0xCD.toByte(), 0x16, 0xC3.toByte())
+        File(shared, "DOS").apply { mkdirs() }.resolve("HELLO.COM").writeBytes(code + msg)
+        val sys = DebianSystem(this.sys.root, this.sys.proot.copy(binds = this.sys.proot.binds + (shared.path to shared.path)), File(work, "home"), arch).apply { extraEnv = this@DebianIntegrationTest.sys.extraEnv }
+        val d = LinuxDisplay(sys, 46, desktop = true)
+        val windows = java.util.concurrent.atomic.AtomicReference<List<Pair<String, String>>>(emptyList())
+        try {
+            d.start(1280, 800)
+            val s = org.kdx.shell.droid.WindSession(sys, d, shared, org.kdx.shell.droid.WindSystem.Config(), 96,
+                onCrash = { c, _ -> println("CRASH ${c.summary}") }, onWindows = { l, _ -> windows.set(l) }, status = {})
+            s.start()
+            var waited = 0
+            while (!org.kdx.shell.droid.WindSystem.dosboxInstalled(sys) && waited < 600) { Thread.sleep(2000); waited += 2 }
+            println("DOSBox-X installed: ${org.kdx.shell.droid.WindSystem.dosboxInstalled(sys)} after ${waited}s")
+            assertTrue(org.kdx.shell.droid.WindSystem.dosboxInstalled(sys))
+            val progs = org.kdx.shell.droid.WindSystem.installedPrograms(sys, shared)
+            val hello = progs.first { it.category == "DOS programs" }
+            println("DOS program in the start menu: ${hello.name} -> ${hello.command}")
+            s.run(hello)
+            waited = 0
+            while (windows.get().none { it.second.contains("DOSBox", true) } && waited < 60) { Thread.sleep(1000); waited++ }
+            println("taskbar: ${windows.get()}")
+            Thread.sleep(3000)
+            snapshot(d, "dosbox", 800)
+            assertTrue("DOSBox-X window", windows.get().any { it.second.contains("DOSBox", true) })
+            s.shutdown()
+        } finally { d.stop() }
+    }
 }
