@@ -44,7 +44,7 @@ import org.kdx.shell.droid.PrivacyVpnService
 fun PrivacyVpnApp(state: KdxState) {
     val c = LocalBreeze.current
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val scope = rememberCoroutineScope { org.kdx.shell.core.StartGuard.coroutines }
     val prefs = remember { PrivacyVpnService.prefs(ctx) }
     var running by remember { mutableStateOf(PrivacyVpnService.isRunning) }
     var status by remember { mutableStateOf(PrivacyVpnService.status) }

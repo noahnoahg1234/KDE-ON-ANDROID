@@ -114,7 +114,7 @@ class KonsoleSession(
     val exports = linkedMapOf<String, String>()
     private var stateRef: KdxState? = null
     val home: File get() = droid?.home ?: stateRef?.homeDir() ?: File("/")
-    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + org.kdx.shell.core.StartGuard.coroutines)
     val lines = mutableStateListOf<Pair<String, Int>>() // text, kind: 0 out, 1 prompt, 2 err/info
     var cwd by mutableStateOf(start)
     var input by mutableStateOf("")

@@ -99,16 +99,40 @@ object StartGuard {
         if (log.isNotBlank()) { appendLine(); appendLine("Recent events:"); appendLine(log) }
     }
 
+    @Volatile private var appCtx: Context? = null
+
+    /**
+     * For every coroutine scope in KDX: a bug in background work (a file that can't be read, a Linux program that
+     * doesn't start…) shows a message instead of crashing KDX. As the home screen, a crash makes Android restart KDX
+     * (the screen blinking black), and the same bug can then crash it again and again.
+     */
+    val coroutines = kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
+        e.printStackTrace()
+        val app = appCtx ?: return@CoroutineExceptionHandler
+        log(app, "Recovered from an error: $e at ${e.stackTrace.firstOrNull { it.className.startsWith("org.kdx") } ?: e.stackTrace.firstOrNull()}")
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            runCatching { android.widget.Toast.makeText(app, "Something went wrong: ${e.message ?: e.javaClass.simpleName}", android.widget.Toast.LENGTH_LONG).show() }
+        }
+    }
+
     /** Saves the details of a crash in KDX's own code (then lets Android handle it as usual). */
     fun installCrashRecorder(ctx: Context) {
         val app = ctx.applicationContext ?: ctx
+        appCtx = app
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         if (previous is Recorder) return
         Thread.setDefaultUncaughtExceptionHandler(Recorder(app, previous))
     }
 
-    private class Recorder(val ctx: Context, val previous: Thread.UncaughtExceptionHandler?) : Thread.UncaughtExceptionHandler {
+    private class Recorder(val first: Context, val previous: Thread.UncaughtExceptionHandler?) : Thread.UncaughtExceptionHandler {
         override fun uncaughtException(t: Thread, e: Throwable) {
+            val ctx = appCtx ?: first
+            if (survivable(t, e)) {
+                // a helper thread (a Linux program's output reader, a network connection…) failed: that thread ends,
+                // KDX – the home screen – keeps running
+                runCatching { log(ctx, "Recovered from an error in thread ${t.name}: $e at ${e.stackTrace.firstOrNull()}") }
+                return
+            }
             runCatching {
                 crashFile(ctx).writeText("KDX crashed – ${java.util.Date()} (thread ${t.name})\n" + e.stackTraceToString().take(20_000))
                 log(ctx, "CRASH: $e")
@@ -116,6 +140,13 @@ object StartGuard {
             previous?.uncaughtException(t, e)
         }
     }
+
+    /**
+     * An error KDX can survive: on a thread other than the main (screen) thread, and not the VM itself failing (out of
+     * memory etc.). The main thread can't continue after an error, so that one still ends KDX (and is recorded).
+     */
+    fun survivable(t: Thread, e: Throwable): Boolean =
+        t !== android.os.Looper.getMainLooper().thread && e !is VirtualMachineError && e.cause !is VirtualMachineError
 
     /** Why Android ended KDX recently (Android 11+), newest first, in plain words. */
     fun recentExitReasons(ctx: Context): List<String> {

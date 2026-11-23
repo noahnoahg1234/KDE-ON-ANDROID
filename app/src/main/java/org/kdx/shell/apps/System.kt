@@ -243,7 +243,7 @@ fun InfoCenter(state: KdxState) {
 fun SystemSettings(state: KdxState, w: KWindow) {
     val c = LocalBreeze.current
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val scope = rememberCoroutineScope { org.kdx.shell.core.StartGuard.coroutines }
     val scroll = rememberScrollState()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) scope.launch {
@@ -444,7 +444,7 @@ private fun RealKdeSection(state: KdxState) {
 private fun StoragePackingSection(state: KdxState) {
     val c = LocalBreeze.current
     val deb = state.debian ?: return
-    val scope = rememberCoroutineScope()
+    val scope = rememberCoroutineScope { org.kdx.shell.core.StartGuard.coroutines }
     var refresh by remember { mutableIntStateOf(0) }
     var busy by remember { mutableStateOf<String?>(null) }
     var result by remember { mutableStateOf<String?>(null) }

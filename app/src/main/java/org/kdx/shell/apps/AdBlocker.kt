@@ -46,7 +46,7 @@ private val upstreams = listOf(
 fun AdBlocker(state: KdxState) {
     val c = LocalBreeze.current
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val scope = rememberCoroutineScope { org.kdx.shell.core.StartGuard.coroutines }
     val prefs = remember { AdBlockService.prefs(ctx) }
     var running by remember { mutableStateOf(AdBlockService.isActive(ctx)) }
     var queries by remember { mutableLongStateOf(0) }

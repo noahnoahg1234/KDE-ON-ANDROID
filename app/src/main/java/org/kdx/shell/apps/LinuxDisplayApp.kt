@@ -51,7 +51,7 @@ import kotlin.math.hypot
 
 /** Connection + framebuffer for one Linux Display window. */
 class DisplaySession : Closeable {
-    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + org.kdx.shell.core.StartGuard.coroutines)
     var rfb: RfbClient? = null
     var bitmap by mutableStateOf<Bitmap?>(null)
     var frame by mutableIntStateOf(0)

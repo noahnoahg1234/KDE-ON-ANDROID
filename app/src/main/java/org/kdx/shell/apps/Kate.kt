@@ -51,7 +51,7 @@ class KateSession(path: String?) {
 @Composable
 fun Kate(state: KdxState, w: KWindow) {
     val c = LocalBreeze.current
-    val scope = rememberCoroutineScope()
+    val scope = rememberCoroutineScope { org.kdx.shell.core.StartGuard.coroutines }
     val s = remember(w) { w.retain("kate") { KateSession(w.arg) } }
     var dialog by remember { mutableStateOf<String?>(null) }
     var findText by remember { mutableStateOf("") }

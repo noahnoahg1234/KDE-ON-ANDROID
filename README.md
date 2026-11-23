@@ -294,6 +294,11 @@ running but its window keeps losing the screen (another app's window or overlay 
 "The screen keeps flickering" notice appears. Everything is also in an event log: System Settings → Troubleshooting →
 **Copy diagnostics**.
 
+KDX also keeps running when something goes wrong in the background: an error in background work (a Linux program
+that doesn't start, a file that can't be read…) or in a helper thread shows "Something went wrong" and goes into the
+event log, instead of crashing KDX and making Android restart it. Leftover X display locks from crashed sessions are
+cleaned up before a display is picked (they used to run out, and starting KDE Plasma then crashed KDX on every start).
+
 ## Install
 Download `app-release.apk` from the latest **Build KDX** run in GitHub Actions (artifact `KDX-apk`) and install it.
 To use KDX as your home screen: *Kickoff → Leave → Default Home App*, then choose **KDX**.

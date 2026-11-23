@@ -188,7 +188,7 @@ fun shareFile(state: KdxState, ctx: android.content.Context, f: File) {
 fun Dolphin(state: KdxState, w: KWindow) {
     val c = LocalBreeze.current
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val scope = rememberCoroutineScope { org.kdx.shell.core.StartGuard.coroutines }
     val s = remember(w) { w.retain("dolphin") { DolphinSession(w.arg?.let { File(it) } ?: state.homeDir()) } }
     var hasAccess by remember { mutableStateOf(state.hasStorageAccess()) }
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {

@@ -103,6 +103,9 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     private val ctx: Context get() = getApplication()
     private val prefs = app.getSharedPreferences("kdx", Context.MODE_PRIVATE)
 
+    /** Background jobs: a bug in one shows a message instead of crashing KDX (see StartGuard.coroutines). */
+    private val guard = StartGuard.coroutines
+
     // ---- settings (persisted) ----
     var themeMode by mutableStateOf(ThemeMode.entries[prefs.getInt("theme", 0).coerceIn(0, 2)])
     var accentIndex by mutableIntStateOf(prefs.getInt("accent", 1))
@@ -152,7 +155,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
 
     /** Re-reads DroidSystem from disk, upgrades an older install in place, and refreshes Linux apps for Kickoff. */
     fun reloadDroid() {
-        viewModelScope.launch {
+        viewModelScope.launch(guard) {
             val movedTo = withContext(Dispatchers.IO) { runCatching { moveToAndroidFolder() }.getOrNull() }
             if (movedTo != null) toast("Moved DroidSystem to $movedTo")
             val (ds, apps, migrated) = withContext(Dispatchers.IO) {
@@ -194,7 +197,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         val audio = linuxAudio ?: return
         if (!linuxSound) { androidAudio.stop(); return }
         if (!audio.isSetUp) {
-            if (!soundHintShown) { soundHintShown = true; viewModelScope.launch { toast("For sound in Linux apps, run sound-setup in Konsole once") } }
+            if (!soundHintShown) { soundHintShown = true; viewModelScope.launch(guard) { toast("For sound in Linux apps, run sound-setup in Konsole once") } }
             return
         }
         runCatching { audio.start() }
@@ -203,7 +206,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
 
     fun setSound(on: Boolean) {
         linuxSound = on; save()
-        if (on) viewModelScope.launch(Dispatchers.IO) { ensureSound() } else { androidAudio.stop(); linuxAudio?.stop() }
+        if (on) viewModelScope.launch(Dispatchers.IO + guard) { ensureSound() } else { androidAudio.stop(); linuxAudio?.stop() }
     }
     /** Bumped when Debian packages / Flatpaks change, so Bazaar and Kickoff re-check. */
     var debianVersion by mutableIntStateOf(0)
@@ -226,7 +229,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
             org.kdx.shell.droid.AdBlockService.isRunning -> org.kdx.shell.droid.AdBlockService.DNS4
             else -> "1.1.1.1\nnameserver 8.8.8.8"
         }
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch(Dispatchers.IO + guard) {
             runCatching {
                 val f = File(d.root, "etc/resolv.conf")
                 java.nio.file.Files.deleteIfExists(f.toPath())
@@ -245,7 +248,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
             // process with KDX's user ID is KDX's own, and all DroidSystem programs carry HOSTNAME=droidsystem.
             // Only processes older than this KDX process, and anything that starts Linux programs waits for this
             // first (it used to kill a display server started at the same moment: "cannot connect to X server").
-            orphanCleanup = viewModelScope.launch(Dispatchers.IO) { runCatching { org.kdx.shell.droid.Procs.killOrphans("HOSTNAME=droidsystem") } }
+            orphanCleanup = viewModelScope.launch(Dispatchers.IO + guard) { runCatching { org.kdx.shell.droid.Procs.killOrphans("HOSTNAME=droidsystem") } }
         }
         if (d != null) {
             if (linuxDisplay?.sys?.root != d.root) {
@@ -270,13 +273,13 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         debianError = null
         debianLog.clear()
         debianProgress = 0f to "Starting"
-        viewModelScope.launch {
+        viewModelScope.launch(guard) {
             val r = withContext(Dispatchers.IO) {
                 runCatching {
                     sys.bootstrap(
                         org.kdx.shell.droid.DebianRepo(arch = sys.arch), File(ctx.cacheDir, "debian"),
-                        progress = { p, m -> viewModelScope.launch { debianProgress = p to m } },
-                        log = { line -> viewModelScope.launch { debianLog += line; while (debianLog.size > 300) debianLog.removeAt(0) } },
+                        progress = { p, m -> viewModelScope.launch(guard) { debianProgress = p to m } },
+                        log = { line -> viewModelScope.launch(guard) { debianLog += line; while (debianLog.size > 300) debianLog.removeAt(0) } },
                     )
                 }
             }
@@ -289,7 +292,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     fun uninstallDebian() {
         val d = debian ?: debianFor(droid)
         attachDebian(null)
-        viewModelScope.launch {
+        viewModelScope.launch(guard) {
             withContext(Dispatchers.IO) { d.root.deleteTree() }
             refreshLinuxApps(); toast("Debian base removed")
         }
@@ -302,7 +305,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
 
     /** Stops an app window's display (called when its KDX window closes). */
     fun releaseDisplay(n: Int) {
-        appDisplays.remove(n)?.let { d -> viewModelScope.launch(Dispatchers.IO) { d.stop() } }
+        appDisplays.remove(n)?.let { d -> viewModelScope.launch(Dispatchers.IO + guard) { d.stop() } }
         org.kdx.shell.droid.LinuxAppsService.update(ctx, appDisplays.size)
     }
 
@@ -342,7 +345,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         val w = KWindow(nextId++, KApp.LINUXDISPLAY, "app:$n", currentDesktop, maximized = !floatingByDefault)
         w.title = title; w.iconFile = icon
         windows.add(w); activeId = w.id
-        viewModelScope.launch {
+        viewModelScope.launch(guard) {
             runCatching {
                 withContext(Dispatchers.IO) {
                     awaitLinuxCleanup()
@@ -407,14 +410,14 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         // the scale factor is chosen when the session starts, so restart a running one
         if (windows.any { it.fullscreen }) {
             windows.filter { it.fullscreen }.forEach { close(it) }
-            viewModelScope.launch { delay(1500); launchPlasma() }
+            viewModelScope.launch(guard) { delay(1500); launchPlasma() }
         }
     }
 
     /** One step at a time: Linux system → Debian → display server + Plasma → start. */
     private fun runRealKde() {
         if (realKdeJob?.isActive == true) return
-        realKdeJob = viewModelScope.launch {
+        realKdeJob = viewModelScope.launch(guard) {
             while (realKde) {
                 val deb = debian
                 val dp = droidProgress; val bp = debianProgress
@@ -498,7 +501,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         w.title = "KDE Plasma"; w.fullscreen = true
         disp.extraEnv = scaleEnv // apps started on Plasma's screen (Flatpaks via KDX) get the same scale
         windows.add(w); activeId = w.id
-        viewModelScope.launch {
+        viewModelScope.launch(guard) {
             runCatching {
                 withContext(Dispatchers.IO) {
                     awaitLinuxCleanup()
@@ -530,7 +533,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         if (d == null) return
         val l = org.kdx.shell.droid.LinuxLauncher(d) { r -> runRequested(r) }
         launcher = l
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch(Dispatchers.IO + guard) {
             runCatching { l.start() }.onFailure { toast("Couldn't start the app launcher: ${it.message}") }
             runCatching { org.kdx.shell.droid.LinuxLauncher.installWrapper(d) }
         }
@@ -547,7 +550,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
             runner.launch(r.id, r.args, on = disp, commandOverride = r.command); null
         } else {
             // from anywhere else (a terminal, an app window): a KDX window of its own
-            viewModelScope.launch { launchFlatpak(r.id) }; null
+            viewModelScope.launch(guard) { launchFlatpak(r.id) }; null
         }
     }
 
@@ -587,7 +590,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
             .putLong("wind.wallpaper", c.wallpaper).putString("wind.perf", c.performance).putBoolean("wind.crashDialog", c.crashDialog)
             .putBoolean("wind.autoRestart", c.autoRestart).putString("wind.debug", c.debugLog).putString("wind.dlls", c.dllOverrides)
             .putString("wind.res", c.resolution).putBoolean("wind.modern", c.modernTheme).putBoolean("wind.touchFrames", c.touchFrames).apply()
-        windSession?.let { s -> s.config = c; viewModelScope.launch(Dispatchers.IO) { runCatching { s.applySettings() } } }
+        windSession?.let { s -> s.config = c; viewModelScope.launch(Dispatchers.IO + guard) { runCatching { s.applySettings() } } }
     }
 
     /** Android/WindSystem: the phone's Android folder when KDX has file access, else KDX's folder there. */
@@ -623,7 +626,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         windows.add(w); activeId = w.id
         windStatus = "Starting WindSystem…"; windError = null
         val shared = windSharedDir()
-        viewModelScope.launch {
+        viewModelScope.launch(guard) {
             runCatching {
                 withContext(Dispatchers.IO) {
                     awaitLinuxCleanup()
@@ -631,9 +634,9 @@ class KdxState(app: Application) : AndroidViewModel(app) {
                     disp.start(xw, xh)
                     if (!disp.waitForX()) throw java.io.IOException("the display server didn't come up")
                     val s = org.kdx.shell.droid.WindSession(deb, disp, shared, windConfig, autoDpi,
-                        onCrash = { c, f -> viewModelScope.launch { windCrashes += c to f } },
-                        onWindows = { list, active -> viewModelScope.launch { windWindows = list; windActive = active } },
-                        status = { st -> viewModelScope.launch { windStatus = st } })
+                        onCrash = { c, f -> viewModelScope.launch(guard) { windCrashes += c to f } },
+                        onWindows = { list, active -> viewModelScope.launch(guard) { windWindows = list; windActive = active } },
+                        status = { st -> viewModelScope.launch(guard) { windStatus = st } })
                     windSession = s
                     s.start()
                 }
@@ -659,7 +662,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     fun endWindSystem() {
         val s = windSession; windSession = null
         windWindows = emptyList(); windStatus = null
-        viewModelScope.launch(Dispatchers.IO) { runCatching { s?.shutdown() } }
+        viewModelScope.launch(Dispatchers.IO + guard) { runCatching { s?.shutdown() } }
         windows.filter { it.app == KApp.WINDSYSTEM }.forEach { close(it) }
     }
 
@@ -672,7 +675,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     fun changeAutoSave(on: Boolean, gb: Int = autoSaveGb) {
         autoSave = on; autoSaveGb = gb
         prefs.edit().putBoolean("autoSave", on).putInt("autoSaveGb", gb).apply()
-        if (on) viewModelScope.launch { checkStorage() }
+        if (on) viewModelScope.launch(guard) { checkStorage() }
     }
 
     /** Remembers when a packable part was last opened (automatic saving packs ones you haven't used for a while). */
@@ -773,7 +776,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         val existing = droidRoot?.let { DroidSystem(ctx, File(it)) }?.takeIf { it.isInstalled }
         if (existing != null) {
             droidEnabled = true; save(); reloadDroid()
-            viewModelScope.launch { if (autoInstallDebian && !withContext(Dispatchers.IO) { debianFor(existing).isInstalled }) installDebian() }
+            viewModelScope.launch(guard) { if (autoInstallDebian && !withContext(Dispatchers.IO) { debianFor(existing).isInstalled }) installDebian() }
             return
         }
         installDroid(droidTargetDir())
@@ -782,9 +785,9 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     fun installDroid(dir: File) {
         val ds = DroidSystem(ctx, dir)
         droidProgress = 0f to "Preparing"
-        viewModelScope.launch {
+        viewModelScope.launch(guard) {
             val r = withContext(Dispatchers.IO) {
-                runCatching { ds.install { p, msg -> viewModelScope.launch { droidProgress = p to msg } } }
+                runCatching { ds.install { p, msg -> viewModelScope.launch(guard) { droidProgress = p to msg } } }
             }
             droidProgress = null
             r.onSuccess {
@@ -799,7 +802,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
 
     fun uninstallDroid() {
         val dir = droidRoot?.let { File(it) } ?: return
-        viewModelScope.launch {
+        viewModelScope.launch(guard) {
             withContext(Dispatchers.IO) { DroidSystem(ctx, dir).uninstall() }
             droidEnabled = false; droidRoot = null; droid = null; linuxApps = emptyList(); save()
             toast("DroidSystem removed")
@@ -807,7 +810,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     }
 
     fun refreshLinuxApps() {
-        viewModelScope.launch {
+        viewModelScope.launch(guard) {
             linuxApps = withContext(Dispatchers.IO) {
                 (droid?.desktopEntries(flatpakEnabled) ?: emptyList()) +
                     (debian?.let { org.kdx.shell.droid.AndroidLinux.desktopEntries(it, flatpakEnabled) } ?: emptyList())
@@ -876,7 +879,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
                 "\nKDE Plasma auto-start: ${if (realKde) "on" else "off"}"
         }
         // running fine for a while: not a loop
-        viewModelScope.launch { delay(StartGuard.LOOP_WINDOW_MS); StartGuard.markStable(ctx) }
+        viewModelScope.launch(guard) { delay(StartGuard.LOOP_WINDOW_MS); StartGuard.markStable(ctx) }
     }
 
     /** The screen keeps flickering while KDX keeps running (KDX's window keeps losing the screen): the details. */
@@ -894,7 +897,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         StartGuard.markStable(ctx)
         runCatching { StartGuard.crashFile(ctx).delete() }
         reloadDroid()
-        if (realKde) viewModelScope.launch { delay(2500); runRealKde() }
+        if (realKde) viewModelScope.launch(guard) { delay(2500); runRealKde() }
     }
 
     init {
@@ -903,13 +906,13 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         // safe mode: not even the Linux system (it comes back with "Resume")
         if (!safeMode) reloadDroid()
         // real KDE Plasma as the desktop: start it (or continue setting it up) when KDX opens
-        if (realKde && !safeMode) viewModelScope.launch { delay(2500); runRealKde() }
+        if (realKde && !safeMode) viewModelScope.launch(guard) { delay(2500); runRealKde() }
         // automatic space saving: a minute after start, then every 30 minutes (not in safe mode)
-        viewModelScope.launch { delay(60_000); while (true) { if (!safeMode) checkStorage(); delay(30 * 60_000L) } }
+        viewModelScope.launch(guard) { delay(60_000); while (true) { if (!safeMode) checkStorage(); delay(30 * 60_000L) } }
     }
 
     fun reloadApps() {
-        viewModelScope.launch {
+        viewModelScope.launch(guard) {
             appsLoading = true
             androidApps = withContext(Dispatchers.IO) { queryApps() }
             appsLoading = false
@@ -968,7 +971,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     fun close(w: KWindow) {
         if (w.app == KApp.WINDSYSTEM) {
             val ws = windSession; windSession = null; windWindows = emptyList(); windStatus = null
-            if (ws != null) viewModelScope.launch(Dispatchers.IO) { runCatching { ws.shutdown() } }
+            if (ws != null) viewModelScope.launch(Dispatchers.IO + guard) { runCatching { ws.shutdown() } }
         }
         w.dispose()
         windows.remove(w)

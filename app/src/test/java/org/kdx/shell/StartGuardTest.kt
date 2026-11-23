@@ -10,6 +10,7 @@ import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
+import kotlinx.coroutines.launch
 import org.kdx.shell.core.StartGuard
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
@@ -44,6 +45,22 @@ class StartGuardTest {
         assertTrue(StartGuard.recentLog(ctx).contains("mode recovery"))
         StartGuard.markStable(ctx); StartGuard.onProcessStart(ctx)
         assertEquals(StartGuard.Mode.NORMAL, StartGuard.mode)
+    }
+
+    /** A bug in background work or a helper thread is logged, and KDX (the home screen) keeps running. */
+    @Test fun errorsDontCrashKdx() {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        StartGuard.installCrashRecorder(ctx)
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + StartGuard.coroutines)
+        kotlinx.coroutines.runBlocking { scope.launch { throw IllegalStateException("background bug") }.join() }
+        assertTrue(StartGuard.recentLog(ctx).contains("background bug"))
+        val t = Thread { throw IllegalArgumentException("helper thread bug") }
+        assertTrue(StartGuard.survivable(t, IllegalArgumentException()))
+        assertFalse("out of memory still ends KDX", StartGuard.survivable(t, OutOfMemoryError()))
+        assertFalse("the screen thread can't continue", StartGuard.survivable(android.os.Looper.getMainLooper().thread, IllegalArgumentException()))
+        t.start(); t.join()
+        assertTrue(StartGuard.recentLog(ctx).contains("helper thread bug"))
+        assertFalse("not recorded as a crash", StartGuard.crashFile(ctx).exists())
     }
 
     @Test fun flickerDetector() {

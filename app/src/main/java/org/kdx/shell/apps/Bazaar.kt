@@ -74,7 +74,7 @@ enum class BazaarTab(val label: String, val icon: ImageVector) {
 }
 
 class BazaarSession : Closeable {
-    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + org.kdx.shell.core.StartGuard.coroutines)
     var items by mutableStateOf<List<StoreItem>>(emptyList())
     var loading by mutableStateOf(true)
     val busy = mutableStateListOf<String>()

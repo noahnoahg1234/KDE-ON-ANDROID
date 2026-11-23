@@ -306,7 +306,7 @@ private fun BoxScope.WindSettings(state: KdxState, wc: WindColors, close: () -> 
     val cfg = state.windConfig
     fun set(c: WindSystem.Config) = state.changeWindConfig(c)
     var confirmReset by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
+    val scope = rememberCoroutineScope { org.kdx.shell.core.StartGuard.coroutines }
     Column(
         Modifier.align(Alignment.Center).padding(12.dp).widthIn(max = 560.dp).fillMaxHeight(0.92f).clip(RoundedCornerShape(10.dp))
             .background(wc.menu).padding(14.dp),
