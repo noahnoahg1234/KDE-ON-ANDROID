@@ -177,6 +177,22 @@ class LinuxDisplay(
     }
 
     companion object {
+        /** Biggest a saved log grows (a chatty program could otherwise slowly fill the phone's storage). */
+        const val LOG_MAX_BYTES = 4L * 1024 * 1024
+
+        /** Appends [line] to [f] until it reaches [max] bytes; then notes that once and drops the rest. */
+        fun appendCapped(f: File, line: String, max: Long = LOG_MAX_BYTES) {
+            runCatching {
+                val len = f.length()
+                if (len < max) f.appendText(line + "\n")
+                else if (!f.readTextTail(80).contains(LOG_FULL)) f.appendText("$LOG_FULL\n")
+            }
+        }
+        private const val LOG_FULL = "… (log is full – later lines are not saved)"
+        private fun File.readTextTail(n: Int): String = java.io.RandomAccessFile(this, "r").use { r ->
+            val start = (r.length() - n).coerceAtLeast(0); r.seek(start); val b = ByteArray((r.length() - start).toInt()); r.readFully(b); String(b)
+        }
+
         /**
          * A free X display number for a new window (2–63), or null if every one is really in use.
          *
@@ -236,7 +252,7 @@ class LinuxDisplay(
     /** Appends a line to the saved log file (best effort). */
     fun logToFile(line: String) {
         val f = logFile ?: return
-        synchronized(this) { runCatching { f.appendText(line + "\n") } }
+        synchronized(this) { appendCapped(f, line) }
     }
 
     fun drain(p: Process, tag: String) = Thread {

@@ -50,7 +50,7 @@ class WindSession(
         }
         else status("Starting WindSystem…")
         val startLog = File(shared, "Logs/WindSystem.log").apply { parentFile?.mkdirs(); writeText("WindSystem start – ${java.util.Date()}\n") }
-        val toLog: (String) -> Unit = { l -> runCatching { startLog.appendText(l + "\n") } }
+        val toLog: (String) -> Unit = { l -> LinuxDisplay.appendCapped(startLog, l) }
         // the Wine server first (persistent while WindSystem runs), then drive C:
         // (detached from our output pipe: the server keeps running, and a held pipe would make this wait forever)
         sys.run("mkdir -p ${WindSystem.PREFIX}; windsystem-wineserver -p </dev/null >/dev/null 2>&1; true", toLog, env = env)
@@ -73,7 +73,7 @@ class WindSession(
 
     private val BOOT = "${WindSystem.WINE} wineboot --init </dev/null >/tmp/windsystem-boot.log 2>&1; rc=${'$'}?; cat /tmp/windsystem-boot.log; exit ${'$'}rc"
 
-    private fun log(line: String) = runCatching { File(shared, "Logs/WindSystem.log").appendText(line + "\n") }
+    private fun log(line: String) = LinuxDisplay.appendCapped(File(shared, "Logs/WindSystem.log"), line)
 
     /** WindSystems installed before DOSBox-X came with it: install it in the background (WindSystem starts meanwhile). */
     @Volatile var dosboxInstalling = false; private set
@@ -84,7 +84,7 @@ class WindSession(
             val logFile = File(shared, "Logs/DOSBox-X install.log")
             runCatching {
                 logFile.writeText("Installing DOSBox-X – ${java.util.Date()}\n")
-                val rc = sys.run("apt-get -q update </dev/null >/dev/null 2>&1; " + WindSystem.DOSBOX_INSTALL, { l -> runCatching { logFile.appendText(l + "\n") } })
+                val rc = sys.run("apt-get -q update </dev/null >/dev/null 2>&1; " + WindSystem.DOSBOX_INSTALL, { l -> LinuxDisplay.appendCapped(logFile, l) })
                 log(if (rc == 0) "DOSBox-X installed" else "DOSBox-X couldn't be installed (code $rc) – see Logs/DOSBox-X install.log")
             }
             dosboxInstalling = false

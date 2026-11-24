@@ -127,3 +127,13 @@ class FreeDisplayTest {
         root.deleteRecursively()
     }
 }
+
+class LogCapTest {
+    @Test fun savedLogsStopGrowing() {
+        val f = kotlin.io.path.createTempFile("kdx-log").toFile()
+        repeat(500) { org.kdx.shell.droid.LinuxDisplay.appendCapped(f, "x".repeat(99), max = 10_000) }
+        assertTrue("capped near the limit", f.length() in 10_000L..10_300L)
+        assertEquals("full-note written once", 1, f.readText().split("log is full").size - 1)
+        f.delete()
+    }
+}

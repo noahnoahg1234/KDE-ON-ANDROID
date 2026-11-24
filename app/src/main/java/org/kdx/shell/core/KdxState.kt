@@ -974,6 +974,9 @@ class KdxState(app: Application) : AndroidViewModel(app) {
             if (ws != null) viewModelScope.launch(Dispatchers.IO + guard) { runCatching { ws.shutdown() } }
         }
         w.dispose()
+        // a Linux app / Plasma / WindSystem window owns an X display: stop it even if the window was never drawn
+        // (opened on another desktop, minimised…) – it used to keep its display server running and its number taken
+        if (w.app == KApp.LINUXDISPLAY || w.app == KApp.WINDSYSTEM) w.arg?.takeIf { it.startsWith("app:") }?.removePrefix("app:")?.toIntOrNull()?.let { releaseDisplay(it) }
         windows.remove(w)
         if (activeId == w.id) activeId = windows.lastOrNull { !it.minimized && it.desktop == currentDesktop }?.id
     }
