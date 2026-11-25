@@ -55,18 +55,39 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onResume() { super.onResume(); log("KDX in front") }
+    override fun onResume() { super.onResume(); log("KDX in front"); regained() }
 
-    override fun onStop() { super.onStop(); log("KDX hidden") }
+    override fun onStop() {
+        super.onStop(); log("KDX hidden")
+        // KDX was really left (an Android app opened, Home or Recents in another app…): not a blink
+        lostAt = 0L
+    }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
         log("Screen settings changed: ${newConfig.screenWidthDp}x${newConfig.screenHeightDp} dp, dark=${(newConfig.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES}")
     }
 
+    /** When KDX last lost the screen (paused / lost focus) without being hidden; 0 = it has the screen. */
+    private var lostAt = 0L
+
     private fun lostScreen(what: String) {
         log(what)
-        if (desktopShown && flicker.lost(System.currentTimeMillis())) {
+        if (lostAt == 0L) lostAt = System.currentTimeMillis()
+    }
+
+    /**
+     * KDX has the screen back. Only a *blink* counts towards "the screen keeps flickering": the screen taken away and
+     * given back within [BLINK_MS] while KDX was never hidden. Opening an Android app and coming back (KDX is hidden
+     * meanwhile), pulling down the notifications for a while etc. are normal use – they used to set off the warning.
+     */
+    private fun regained() {
+        val since = lostAt; lostAt = 0L
+        if (since == 0L) return
+        val now = System.currentTimeMillis()
+        if (now - since > BLINK_MS) return
+        log("Blink: KDX lost the screen for ${now - since} ms")
+        if (desktopShown && flicker.lost(now)) {
             flicker.reset()
             state.reportFlicker(org.kdx.shell.core.StartGuard.report(this))
         }
@@ -76,6 +97,7 @@ class MainActivity : ComponentActivity() {
         super.onWindowFocusChanged(hasFocus)
         if (!hasFocus) { lostScreen("KDX lost focus (another window is on top)"); return }
         log("KDX has focus")
+        regained()
         // Android only lets the focused app read the clipboard.
         if (desktopShown) readClip()
     }
@@ -90,8 +112,10 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         if (!desktopShown) return
-        // Home button pressed while KDX is in front: behave like "show desktop".
-        if (intent.hasCategory(android.content.Intent.CATEGORY_HOME)) {
+        // Home button pressed while KDX is in front: behave like "show desktop". Pressed in an Android app, it just
+        // brings KDX back as it was (it used to minimise all of KDX's windows too).
+        val kdxWasInFront = lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+        if (intent.hasCategory(android.content.Intent.CATEGORY_HOME) && kdxWasInFront) {
             if (state.kickoffOpen || state.krunnerOpen || state.overviewOpen) state.closeMenus()
             else state.windowsOnDesktop().forEach { state.minimize(it) }
         }
@@ -116,6 +140,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private var metaUsedInChord = false
+
+    private companion object { const val BLINK_MS = 1500L }
 
     private fun handleShortcut(e: KeyEvent): Boolean {
         val code = e.keyCode

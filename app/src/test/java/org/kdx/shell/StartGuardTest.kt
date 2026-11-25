@@ -137,3 +137,40 @@ class LogCapTest {
         f.delete()
     }
 }
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+class AndroidAppSwitchTest {
+    private fun state(a: MainActivity) = androidx.lifecycle.ViewModelProvider(a)[org.kdx.shell.core.KdxState::class.java]
+
+    /** Opening Android apps and coming back is normal use: no "screen keeps flickering" warning. */
+    @Test fun switchingToAndroidAppsIsNotFlicker() {
+        val ctl = Robolectric.buildActivity(MainActivity::class.java).setup()
+        ctl.windowFocusChanged(true)
+        repeat(8) {
+            ctl.windowFocusChanged(false); ctl.pause().stop()   // an Android app covers KDX
+            ctl.restart().start().resume(); ctl.windowFocusChanged(true) // Home → back to KDX
+        }
+        assertNull(state(ctl.get()).flickerDetails)
+        // pulling the notifications down and up again is fine too (no pause, focus back after a while)
+        ctl.windowFocusChanged(false); Thread.sleep(1700); ctl.windowFocusChanged(true)
+        assertNull(state(ctl.get()).flickerDetails)
+        // but the screen really blinking (taken away and given back at once, again and again) is reported
+        repeat(StartGuard.FLICKER_COUNT) { ctl.pause(); ctl.windowFocusChanged(false); ctl.resume(); ctl.windowFocusChanged(true) }
+        assertNotNull(state(ctl.get()).flickerDetails)
+    }
+
+    /** Home pressed in an Android app brings KDX back as it was; pressed on KDX it shows the desktop. */
+    @Test fun homeFromAndroidAppKeepsWindows() {
+        val ctl = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val st = state(ctl.get())
+        st.open(org.kdx.shell.core.KApp.KATE)
+        val w = st.windows.last()
+        val home = android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_HOME)
+        ctl.pause().stop()
+        ctl.newIntent(home); ctl.restart().start().resume()
+        assertFalse("still open", w.minimized)
+        ctl.newIntent(home)
+        assertTrue("Home on KDX = show desktop", w.minimized)
+    }
+}
