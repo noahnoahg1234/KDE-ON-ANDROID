@@ -158,6 +158,7 @@ class AndroidAppSwitchTest {
         // but the screen really blinking (taken away and given back at once, again and again) is reported
         repeat(StartGuard.FLICKER_COUNT) { ctl.pause(); ctl.windowFocusChanged(false); ctl.resume(); ctl.windowFocusChanged(true) }
         assertNotNull(state(ctl.get()).flickerDetails)
+        ctl.pause().stop().destroy() // a KDX screen left running keeps later Compose tests from going idle
     }
 
     /** Home pressed in an Android app brings KDX back as it was; pressed on KDX it shows the desktop. */
@@ -172,5 +173,6 @@ class AndroidAppSwitchTest {
         assertFalse("still open", w.minimized)
         ctl.newIntent(home)
         assertTrue("Home on KDX = show desktop", w.minimized)
+        ctl.pause().stop().destroy()
     }
 }
