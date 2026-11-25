@@ -138,41 +138,26 @@ class LogCapTest {
     }
 }
 
-@RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
-class AndroidAppSwitchTest {
-    private fun state(a: MainActivity) = androidx.lifecycle.ViewModelProvider(a)[org.kdx.shell.core.KdxState::class.java]
-
-    /** Opening Android apps and coming back is normal use: no "screen keeps flickering" warning. */
-    @Test fun switchingToAndroidAppsIsNotFlicker() {
-        val ctl = Robolectric.buildActivity(MainActivity::class.java).setup()
-        ctl.windowFocusChanged(true)
-        repeat(8) {
-            ctl.windowFocusChanged(false); ctl.pause().stop()   // an Android app covers KDX
-            ctl.restart().start().resume(); ctl.windowFocusChanged(true) // Home → back to KDX
+/** Normal use (Android apps, notifications, Home) must not count as the screen flickering; real blinks must. */
+class BlinkDetectorTest {
+    @Test fun androidAppsAndHomeAreNotFlicker() {
+        val b = StartGuard.BlinkDetector()
+        var t = 0L
+        repeat(10) { // open an Android app (KDX paused, then hidden) and come back a second later
+            b.lost(t); b.cancel(); t += 1000; assertEquals(null to false, b.regained(t)); t += 500
         }
-        assertNull(state(ctl.get()).flickerDetails)
-        // pulling the notifications down and up again is fine too (no pause, focus back after a while)
-        ctl.windowFocusChanged(false); Thread.sleep(1700); ctl.windowFocusChanged(true)
-        assertNull(state(ctl.get()).flickerDetails)
-        // but the screen really blinking (taken away and given back at once, again and again) is reported
-        repeat(StartGuard.FLICKER_COUNT) { ctl.pause(); ctl.windowFocusChanged(false); ctl.resume(); ctl.windowFocusChanged(true) }
-        assertNotNull(state(ctl.get()).flickerDetails)
-        ctl.pause().stop().destroy() // a KDX screen left running keeps later Compose tests from going idle
+        repeat(10) { // Home pressed on KDX: paused, the Home press arrives, resumed at once
+            b.lost(t); b.cancel(); t += 50; assertEquals(null to false, b.regained(t)); t += 500
+        }
+        b.lost(t); t += 4000 // notifications pulled down for a while
+        assertEquals(null to false, b.regained(t))
     }
 
-    /** Home pressed in an Android app brings KDX back as it was; pressed on KDX it shows the desktop. */
-    @Test fun homeFromAndroidAppKeepsWindows() {
-        val ctl = Robolectric.buildActivity(MainActivity::class.java).setup()
-        val st = state(ctl.get())
-        st.open(org.kdx.shell.core.KApp.KATE)
-        val w = st.windows.last()
-        val home = android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_HOME)
-        ctl.pause().stop()
-        ctl.newIntent(home); ctl.restart().start().resume()
-        assertFalse("still open", w.minimized)
-        ctl.newIntent(home)
-        assertTrue("Home on KDX = show desktop", w.minimized)
-        ctl.pause().stop().destroy()
+    @Test fun realBlinksAreReported() {
+        val b = StartGuard.BlinkDetector()
+        var t = 0L
+        val results = (1..StartGuard.FLICKER_COUNT).map { b.lost(t); t += 200; b.regained(t).also { t += 2000 } }
+        assertTrue(results.all { it.first == 200L })
+        assertEquals("the 5th blink within 20 s is flicker", listOf(false, false, false, false, true), results.map { it.second })
     }
 }

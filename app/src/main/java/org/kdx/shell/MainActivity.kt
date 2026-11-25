@@ -55,12 +55,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onResume() { super.onResume(); log("KDX in front"); regained() }
+    override fun onResume() { super.onResume(); log("KDX in front"); hiddenSinceFront = false; regained() }
 
     override fun onStop() {
         super.onStop(); log("KDX hidden")
         // KDX was really left (an Android app opened, Home or Recents in another app…): not a blink
-        lostAt = 0L
+        blinks.cancel(); hiddenSinceFront = true
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
@@ -68,29 +68,19 @@ class MainActivity : ComponentActivity() {
         log("Screen settings changed: ${newConfig.screenWidthDp}x${newConfig.screenHeightDp} dp, dark=${(newConfig.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES}")
     }
 
-    /** When KDX last lost the screen (paused / lost focus) without being hidden; 0 = it has the screen. */
-    private var lostAt = 0L
+    private val blinks = org.kdx.shell.core.StartGuard.BlinkDetector()
+    /** KDX was hidden (another app in front) since it was last in front. */
+    private var hiddenSinceFront = true
 
     private fun lostScreen(what: String) {
         log(what)
-        if (lostAt == 0L) lostAt = System.currentTimeMillis()
+        blinks.lost(System.currentTimeMillis())
     }
 
-    /**
-     * KDX has the screen back. Only a *blink* counts towards "the screen keeps flickering": the screen taken away and
-     * given back within [BLINK_MS] while KDX was never hidden. Opening an Android app and coming back (KDX is hidden
-     * meanwhile), pulling down the notifications for a while etc. are normal use – they used to set off the warning.
-     */
     private fun regained() {
-        val since = lostAt; lostAt = 0L
-        if (since == 0L) return
-        val now = System.currentTimeMillis()
-        if (now - since > BLINK_MS) return
-        log("Blink: KDX lost the screen for ${now - since} ms")
-        if (desktopShown && flicker.lost(now)) {
-            flicker.reset()
-            state.reportFlicker(org.kdx.shell.core.StartGuard.report(this))
-        }
+        val (blink, flickering) = blinks.regained(System.currentTimeMillis())
+        if (blink != null) log("Blink: KDX lost the screen for $blink ms")
+        if (flickering && desktopShown) state.reportFlicker(org.kdx.shell.core.StartGuard.report(this))
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -112,10 +102,12 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         if (!desktopShown) return
-        // Home button pressed while KDX is in front: behave like "show desktop". Pressed in an Android app, it just
-        // brings KDX back as it was (it used to minimise all of KDX's windows too).
-        val kdxWasInFront = lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
-        if (intent.hasCategory(android.content.Intent.CATEGORY_HOME) && kdxWasInFront) {
+        if (!intent.hasCategory(android.content.Intent.CATEGORY_HOME)) return
+        blinks.cancel() // Android pauses KDX to hand over the Home press: not a blink
+        // Home pressed while KDX is in front: "show desktop". Pressed in an Android app, it just brings KDX back as it
+        // was (it used to minimise all of KDX's windows too). Android always pauses KDX before this, so "in front"
+        // means: not hidden since it was last in front.
+        if (!hiddenSinceFront) {
             if (state.kickoffOpen || state.krunnerOpen || state.overviewOpen) state.closeMenus()
             else state.windowsOnDesktop().forEach { state.minimize(it) }
         }
@@ -141,7 +133,6 @@ class MainActivity : ComponentActivity() {
 
     private var metaUsedInChord = false
 
-    private companion object { const val BLINK_MS = 1500L }
 
     private fun handleShortcut(e: KeyEvent): Boolean {
         val code = e.keyCode

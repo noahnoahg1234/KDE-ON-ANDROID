@@ -190,6 +190,31 @@ object StartGuard {
         fun reset() = times.clear()
     }
 
+    /**
+     * Tells blinks from normal use. Only a *blink* counts towards "the screen keeps flickering": KDX losing the screen
+     * (paused / focus taken) and getting it back within [windowMs] without ever being hidden. Opening an Android app
+     * and coming back (KDX is hidden meanwhile), pulling the notifications down for a while, pressing Home on KDX
+     * etc. are normal use – they used to set off the warning.
+     */
+    class BlinkDetector(private val windowMs: Long = BLINK_MS, private val flicker: Flicker = Flicker()) {
+        private var lostAt: Long? = null
+        /** KDX lost the screen at [now]. */
+        fun lost(now: Long) { if (lostAt == null) lostAt = now }
+        /** KDX was hidden (another app in front), or the loss had a known cause (Home pressed): not a blink. */
+        fun cancel() { lostAt = null }
+        /** KDX has the screen back at [now]. Returns the blink's length in ms (null if it wasn't one) and whether that makes it flickering. */
+        fun regained(now: Long): Pair<Long?, Boolean> {
+            val since = lostAt ?: return null to false
+            lostAt = null
+            if (now - since > windowMs) return null to false
+            val flickering = flicker.lost(now)
+            if (flickering) flicker.reset()
+            return (now - since) to flickering
+        }
+    }
+
+    const val BLINK_MS = 1500L
+
     const val FLICKER_COUNT = 5
     const val FLICKER_WINDOW_MS = 20_000L
 }
