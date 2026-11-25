@@ -256,6 +256,29 @@ class ShellScreenshotTest {
         assertTrue(!state.safeMode)
     }
 
+    /** Minimising (and restoring) any app must not show an error. */
+    @Test fun minimizeEveryApp() {
+        val ctx = rule.activity.applicationContext
+        org.kdx.shell.core.StartGuard.logFile(ctx).delete()
+        for (app in KApp.entries) {
+            if (app == KApp.PLASMA || app == KApp.WINDSYSTEM) continue
+            rule.runOnUiThread { state.open(app) }
+            rule.mainClock.advanceTimeBy(1500)
+            val w = state.windows.lastOrNull() ?: continue
+            rule.runOnUiThread { state.minimize(w) }
+            rule.mainClock.advanceTimeBy(1500)
+            rule.runOnUiThread { state.focus(w) }
+            rule.mainClock.advanceTimeBy(1500)
+            rule.runOnUiThread { state.minimize(w) }
+            rule.mainClock.advanceTimeBy(1500)
+            org.robolectric.shadows.ShadowLooper.idleMainLooper()
+            val log = org.kdx.shell.core.StartGuard.recentLog(ctx, 200)
+            val toast = org.robolectric.shadows.ShadowToast.getTextOfLatestToast()
+            assertTrue("${app.name}: $log", !log.contains("error", ignoreCase = true))
+            assertTrue("${app.name}: toast $toast", toast == null || !toast.contains("wrong"))
+        }
+    }
+
     @Test fun flickerBanner() {
         rule.runOnUiThread { state.reportFlicker("Recent events:\n12:00:01.100 KDX lost focus (another window is on top)") }
         shot("76-flicker")

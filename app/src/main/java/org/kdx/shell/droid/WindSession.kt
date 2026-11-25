@@ -154,7 +154,16 @@ class WindSession(
         run(WindSystem.Program(parts.first().substringAfterLast('\\').substringAfterLast('/'), parts))
     }
 
-    private fun xdo(args: String) = runCatching { sys.run("xdotool $args >/dev/null 2>&1; true", env = display.env) }
+    /**
+     * Runs xdotool. Starting a program in DroidSystem takes a moment (much longer on a slow phone), so on Android's
+     * screen thread this would freeze KDX – minimising a window from the taskbar showed "KDX isn't responding".
+     * There it goes to a background thread instead.
+     */
+    private fun xdo(args: String) {
+        val cmd = { runCatching { sys.run("xdotool $args >/dev/null 2>&1; true", env = display.env) } }
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) xdoQueue.execute { cmd() } else cmd()
+    }
+    private val xdoQueue = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "windsystem-xdotool").apply { isDaemon = true } }
 
     fun focus(id: String) = xdo("windowactivate $id")
     fun minimize(id: String) = xdo("windowminimize $id")

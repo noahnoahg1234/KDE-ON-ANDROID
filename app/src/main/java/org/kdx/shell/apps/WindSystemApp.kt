@@ -144,7 +144,7 @@ internal fun Taskbar(
                 Box {
                     Column(
                         Modifier.fillMaxHeight().widthIn(min = 44.dp, max = if (narrow) 120.dp else 180.dp).background(if (active) wc.hover else Color.Transparent)
-                            .combinedClickable(onClick = { if (active) s?.minimize(id) else s?.focus(id) }, onLongClick = { menu = true })
+                            .combinedClickable(onClick = { s?.let { ss -> state.io { if (active) ss.minimize(id) else ss.focus(id) } } }, onLongClick = { menu = true })
                             .padding(horizontal = 8.dp),
                         verticalArrangement = Arrangement.Center,
                     ) {
@@ -157,7 +157,7 @@ internal fun Taskbar(
                     }
                     DropdownMenu(menu, { menu = false }) {
                         DropdownMenuItem(text = { Text("Close window") }, onClick = { menu = false; s?.let { state.io { it.close(id) } } })
-                        DropdownMenuItem(text = { Text("Minimize") }, onClick = { menu = false; s?.minimize(id) })
+                        DropdownMenuItem(text = { Text("Minimize") }, onClick = { menu = false; s?.let { ss -> state.io { ss.minimize(id) } } })
                     }
                 }
             }
