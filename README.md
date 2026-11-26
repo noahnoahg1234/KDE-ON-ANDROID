@@ -198,7 +198,10 @@ System Settings → **Desktop**:
   activities to be resizable*) once and restart the phone; until then Android apps open full screen as usual.
 - **Android app windows on the taskbar** (and in the side dock): tap to bring one to the front; long-press for
   **Maximize** (fills the desktop and keeps KDX's taskbar visible – the maximize button Android draws on the window
-  makes the app full screen over everything), *Restore size*, *App info* and *Remove from taskbar*. Apps opened from
+  makes the app full screen over everything), *Restore size*, *App info* and *Remove from taskbar*. Android sets a
+  window's size only when the app opens and gives apps no call to resize another app's window, so Maximize is
+  remembered (the app opens maximised from then on); to resize windows that are already open, turn on **KDX Window
+  Control** (an accessibility service that only reads where windows are and drags their edges when you choose it). Apps opened from
   KDX appear by themselves; with **Usage access** allowed (System Settings → Desktop), KDX also sees apps opened
   another way and takes closed ones off the taskbar.
 

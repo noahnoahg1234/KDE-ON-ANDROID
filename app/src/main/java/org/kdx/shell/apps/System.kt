@@ -418,6 +418,12 @@ private fun DesktopSection(state: KdxState) {
                 else "Android app windows you open from KDX show on its taskbar. To also see apps opened another way – and have " +
                     "them leave the taskbar when closed – allow KDX \"Usage access\".", color = c.inactiveText, fontSize = 12.sp)
             if (!usage) OutlinedButton({ org.kdx.shell.core.AndroidWindows.openUsageAccess(ctx) }) { Text("Allow Usage access") }
+            val wc = org.kdx.shell.droid.WindowControlService.isOn
+            Text(if (wc) "KDX Window Control is on: Maximize and Restore size resize open Android windows."
+                else "Maximize makes an app open maximised. To resize windows that are already open, turn on \"KDX Window " +
+                    "Control\" in Accessibility (Android gives apps no other way to resize another app's window; it only " +
+                    "reads where windows are, not what's in them).", color = c.inactiveText, fontSize = 12.sp)
+            if (!wc) OutlinedButton({ org.kdx.shell.droid.WindowControlService.openSettings(ctx) }) { Text("Turn on Window Control") }
             if (!canAsk) Text("Android blocks KDX from asking for floating windows on this phone, so Android apps open full screen.",
                 color = c.negative, fontSize = 12.sp)
             else if (supported) Text("Android apps open in floating windows you can move and resize. An app that's already " +

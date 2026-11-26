@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">KDX</string>
+    <string name="window_control_label">KDX Window Control</string>
+    <string name="window_control_description">Lets KDX maximise and resize Android app windows from its taskbar. KDX reads only where app windows are on the screen (not what is in them) and drags their edges for you, only when you choose Maximize or Restore size.</string>
 </resources>

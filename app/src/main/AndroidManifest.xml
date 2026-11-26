@@ -112,5 +112,16 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+        <!-- Maximize / Restore size for Android app windows (Android has no other way for an app to resize them) -->
+        <service
+            android:name=".droid.WindowControlService"
+            android:exported="false"
+            android:label="@string/window_control_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/window_control" />
+        </service>
     </application>
 </manifest>

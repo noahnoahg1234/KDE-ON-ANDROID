@@ -76,3 +76,32 @@ class AndroidWindowsTaskbarTest {
         assertEquals(2400 - 157, right.right)
     }
 }
+
+@org.junit.runner.RunWith(org.robolectric.RobolectricTestRunner::class)
+@org.robolectric.annotation.Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+class MaximizedAndroidAppTest {
+    /** After Maximize, the app opens at the desktop's size (Android only sizes a window when it opens). */
+    @Test fun maximizedAppsOpenMaximized() {
+        val app = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.app.Application>()
+        android.provider.Settings.Global.putInt(app.contentResolver, "enable_freeform_support", 1)
+        val state = org.kdx.shell.core.KdxState(app)
+        state.androidAppWindows = true
+        val a = org.kdx.shell.core.AndroidApp("Chrome", "com.android.chrome", "Main", null)
+        val shadow = org.robolectric.Shadows.shadowOf(app)
+        fun launchBounds(): android.graphics.Rect? {
+            state.launch(a)
+            val started = shadow.nextStartedActivityForResult ?: return null
+            @Suppress("DEPRECATION") return started.options?.getParcelable<android.graphics.Rect>("android:activity.launchBounds")
+        }
+        val normal = launchBounds()!!
+        state.maximizeAndroidWindow(a) // Window Control off: remembered for the next start
+        assertTrue(state.isMaximized(a))
+        val max = launchBounds()!!
+        val dm = app.resources.displayMetrics
+        assertEquals(state.desktopMargins().bounds(dm.widthPixels, dm.heightPixels), max)
+        assertTrue("bigger than a normal window", max.width() * max.height() > normal.width() * normal.height())
+        assertTrue("taskbar stays visible", max.bottom < dm.heightPixels)
+        state.restoreAndroidWindow(a)
+        assertFalse(state.isMaximized(a))
+    }
+}

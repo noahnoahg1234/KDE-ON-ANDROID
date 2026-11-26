@@ -252,7 +252,7 @@ private fun AndroidTaskButton(state: KdxState, a: org.kdx.shell.core.AndroidApp,
 internal fun AndroidWindowMenu(state: KdxState, a: org.kdx.shell.core.AndroidApp, expanded: Boolean, onDismiss: () -> Unit) {
     DropdownMenu(expanded, onDismiss) {
         DropdownMenuItem(text = { Text("Show") }, onClick = { onDismiss(); state.focusAndroidWindow(a) })
-        DropdownMenuItem(text = { Text("Maximize") }, onClick = { onDismiss(); state.maximizeAndroidWindow(a) })
+        DropdownMenuItem(text = { Text("Maximize") }, trailingIcon = { if (state.isMaximized(a)) Icon(Icons.Filled.Check, null) }, onClick = { onDismiss(); state.maximizeAndroidWindow(a) })
         DropdownMenuItem(text = { Text("Restore size") }, onClick = { onDismiss(); state.restoreAndroidWindow(a) })
         DropdownMenuItem(text = { Text("App info") }, onClick = { onDismiss(); state.appInfo(a.pkg) })
         DropdownMenuItem(text = { Text("Remove from taskbar") }, onClick = { onDismiss(); state.removeAndroidWindow(a) })

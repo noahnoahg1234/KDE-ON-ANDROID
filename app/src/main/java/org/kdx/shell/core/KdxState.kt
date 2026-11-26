@@ -1123,7 +1123,9 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         // in a floating window, where Android allows it (otherwise full screen as usual)
         val opts = if (androidAppWindows && AndroidWindows.supported(ctx)) {
             val dm = ctx.resources.displayMetrics
-            AndroidWindows.options(AndroidWindows.bounds(androidWindowCount++, dm.widthPixels, dm.heightPixels))
+            // apps you maximised open maximised (Android applies a window's size only when the app opens)
+            AndroidWindows.options(if (a.pkg in maximizedApps) desktopMargins().bounds(dm.widthPixels, dm.heightPixels)
+                else AndroidWindows.bounds(androidWindowCount++, dm.widthPixels, dm.heightPixels))
         } else null
         runCatching { ctx.startActivity(intent, opts) }
             .recoverCatching { if (opts != null) ctx.startActivity(intent) else throw it }
@@ -1150,23 +1152,49 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         }.onFailure { toast("Could not open ${a.label}") }
     }
 
+    /** Android apps the user maximised: they open maximised from then on. */
+    private val maximizedApps = mutableStateListOf<String>().apply {
+        addAll((prefs.getString("maxApps", "") ?: "").split('|').filter { it.isNotBlank() })
+    }
+    fun isMaximized(a: AndroidApp) = a.pkg in maximizedApps
+    private fun saveMaximized() = prefs.edit().putString("maxApps", maximizedApps.joinToString("|")).apply()
+
     /**
      * Maximises an Android app's window to the desktop – the screen minus KDX's taskbar (or dock) – so the taskbar
      * stays visible. (The maximise button Android draws on the window makes the app full screen over everything.)
+     * Android sets a window's size only when the app opens, and gives apps no call to resize an open window: with
+     * KDX Window Control (an accessibility service) on, KDX drags the open window's edges; otherwise the app opens
+     * maximised the next time.
      */
-    fun maximizeAndroidWindow(a: AndroidApp) = relaunchAndroidWindow(a) { w, h -> desktopMargins().bounds(w, h) }
-
-    /** Back to a normal-sized window. */
-    fun restoreAndroidWindow(a: AndroidApp) = relaunchAndroidWindow(a) { w, h -> AndroidWindows.bounds(androidWindowCount++, w, h) }
-
-    private fun relaunchAndroidWindow(a: AndroidApp, bounds: (Int, Int) -> android.graphics.Rect) {
-        if (!AndroidWindows.supported(ctx)) { toast("Floating windows are off – see System Settings → Desktop"); return }
+    fun maximizeAndroidWindow(a: AndroidApp) {
+        if (a.pkg !in maximizedApps) { maximizedApps.add(a.pkg); saveMaximized() }
         val dm = ctx.resources.displayMetrics
-        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(ComponentName(a.pkg, a.cls))
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-        runCatching { ctx.startActivity(intent, AndroidWindows.options(bounds(dm.widthPixels, dm.heightPixels))) }
-            .onSuccess { trackAndroidWindow(a) }
-            .onFailure { toast("Could not resize ${a.label}") }
+        placeAndroidWindow(a, desktopMargins().bounds(dm.widthPixels, dm.heightPixels), "maximised")
+    }
+
+    /** Back to a normal-sized window (and it opens normal-sized again). */
+    fun restoreAndroidWindow(a: AndroidApp) {
+        if (maximizedApps.remove(a.pkg)) saveMaximized()
+        val dm = ctx.resources.displayMetrics
+        placeAndroidWindow(a, AndroidWindows.bounds(androidWindowCount++, dm.widthPixels, dm.heightPixels), "back to a normal size")
+    }
+
+    private fun placeAndroidWindow(a: AndroidApp, target: android.graphics.Rect, what: String) {
+        if (!AndroidWindows.supported(ctx)) { toast("Floating windows are off – see System Settings → Desktop"); return }
+        val wc = org.kdx.shell.droid.WindowControlService.instance
+        if (wc == null) {
+            toast("${a.label} will open $what next time. To resize open windows too, turn on KDX Window Control (System Settings → Desktop).")
+            return
+        }
+        focusAndroidWindow(a)
+        // give Android a moment to bring the window up, then drag it into place
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            wc.place(a.pkg, target) { ok ->
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    if (!ok) toast("Couldn't resize ${a.label}'s window on this phone – it will open $what next time")
+                }
+            }
+        }, 700)
     }
 
     /** Where KDX's own bars are (a maximised Android window leaves them visible). */
