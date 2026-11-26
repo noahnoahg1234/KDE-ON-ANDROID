@@ -431,7 +431,16 @@ private fun DesktopSection(state: KdxState) {
                 else "Maximize makes an app open maximised. To resize windows that are already open, turn on \"KDX Window " +
                     "Control\" in Accessibility (Android gives apps no other way to resize another app's window; it only " +
                     "reads where windows are, not what's in them).", color = c.inactiveText, fontSize = 12.sp)
-            if (!wc) OutlinedButton({ org.kdx.shell.droid.WindowControlService.openSettings(ctx) }) { Text("Turn on Window Control") }
+            if (!wc) {
+                OutlinedButton({ org.kdx.shell.droid.WindowControlService.openSettings(ctx) }) { Text("Turn on Window Control") }
+                if (android.os.Build.VERSION.SDK_INT >= 33) {
+                    // Android 13+: an app installed from an APK may not use accessibility until "restricted settings" are allowed
+                    Text("Shows \"Restricted setting\"? Android blocks accessibility for apps installed from an APK until you " +
+                        "allow it once: KDX's App info → ⋮ (top right) → \"Allow restricted settings\" (if it isn't there yet, " +
+                        "try turning Window Control on once first), then turn Window Control on.", color = c.inactiveText, fontSize = 12.sp)
+                    OutlinedButton({ state.appInfo(ctx.packageName) }) { Text("Open KDX's App info") }
+                }
+            }
             if (!canAsk) Text("Android blocks KDX from asking for floating windows on this phone, so Android apps open full screen.",
                 color = c.negative, fontSize = 12.sp)
             else if (supported) Text("Android apps open in floating windows you can move and resize. An app that's already " +
