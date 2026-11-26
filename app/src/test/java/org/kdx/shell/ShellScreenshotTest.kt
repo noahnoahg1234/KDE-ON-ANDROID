@@ -14,6 +14,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -291,14 +292,15 @@ class ShellScreenshotTest {
         assertTrue(state.kickoffOpen)
         shot("83-side-dock-apps")
         rule.runOnUiThread { state.closeMenus() }
+        rule.mainClock.advanceTimeBy(1500) // let the app menu fade out
         // a pinned app with an open window: tap = minimise, tap again = back
         val kate = state.windows.first { it.app == KApp.KATE }
         rule.runOnUiThread { state.togglePinned("kdx:KATE"); state.focus(kate) }
         rule.mainClock.advanceTimeBy(300)
-        rule.onNodeWithContentDescription("Kate").performClick()
+        rule.onNodeWithTag("dock:Kate").performClick()
         rule.mainClock.advanceTimeBy(300)
         assertTrue(kate.minimized)
-        rule.onNodeWithContentDescription("Kate").performClick()
+        rule.onNodeWithTag("dock:Kate").performClick()
         rule.mainClock.advanceTimeBy(300)
         assertTrue(!kate.minimized)
         rule.runOnUiThread { state.panelPosition = org.kdx.shell.core.PanelPosition.RIGHT_DOCK }

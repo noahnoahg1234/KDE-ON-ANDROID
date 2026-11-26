@@ -22,6 +22,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -100,7 +101,8 @@ private fun DockButton(state: KdxState, item: DockItem, left: Boolean) {
                         },
                         onLongClick = { menu = true },
                     )
-                    .semantics { contentDescription = label },
+                    .semantics { contentDescription = label }
+                    .testTag("dock:$label"),
                 contentAlignment = Alignment.Center,
             ) {
                 item.launchable?.let { LaunchableIcon(it, 34.dp) } ?: WindowIcon(item.windows.first(), 34.dp)
