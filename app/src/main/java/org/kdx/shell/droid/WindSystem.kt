@@ -73,6 +73,7 @@ WRAP
       fi
     done
     [ -n "${'$'}found" ] || { echo "Wine's server program wasn't found after installing Wine."; exit 1; }
+$ZLIB_BUILTIN
     cat > /usr/local/bin/windsystem-wine <<'WRAP'
 ${wineWrapper("arm64")}WRAP
     cat > /usr/local/bin/windsystem-wineserver <<'WRAP'
@@ -113,6 +114,23 @@ unset TMPDIR
 ${if (arch == "arm64") "$BOX64_ENV\nfor s in $SERVER_PATHS; do [ -e \"${'$'}s\" ] && exec \"${'$'}s\" \"${'$'}@\"; done\nexit 127"
     else "for s in $SERVER_PATHS; do [ -x \"${'$'}s\" ] && exec \"${'$'}s\" \"${'$'}@\"; done\nexec wineserver \"${'$'}@\""}
 """
+
+    /**
+     * Wine needs zlib1.dll as one of its own ("builtin") DLLs – user32.dll loads it, and without it nothing with a
+     * window starts ("zlib1.dll not found", drive C: can't be prepared). The Wine package copies it from the MinGW zlib
+     * package after installing, but only when the system's own architecture is a PC one (amd64/i386); on an ARM phone
+     * (arm64 + Wine's amd64 packages) that step is skipped, so WindSystem does it.
+     */
+    val ZLIB_BUILTIN = """for mingw_arch in x86_64 i686; do
+  wine_arch=${'$'}mingw_arch; [ "${'$'}mingw_arch" = i686 ] && wine_arch=i386
+  outdir=/usr/lib/x86_64-linux-gnu/wine/${'$'}wine_arch-windows
+  for in in /usr/${'$'}mingw_arch-w64-mingw32/lib/zlib*.dll; do
+    [ -f "${'$'}in" ] && [ -d "${'$'}outdir" ] || continue
+    out=${'$'}outdir/${'$'}(basename "${'$'}in")
+    [ -s "${'$'}out" ] && continue
+    { head -c 64 "${'$'}in"; printf 'Wine builtin DLL'; printf '\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0'; tail -c +97 "${'$'}in"; } > "${'$'}out"
+  done
+done"""
 
     /** Wine's x86_64 loader and server: Debian's layout first, then Ubuntu's (and newer Debian's). */
     const val LOADER_PATHS = "/usr/lib/wine/wine64 /usr/lib/x86_64-linux-gnu/wine/wine"
@@ -158,6 +176,8 @@ exec box64 "${'$'}0.x86" "${'$'}@"
                 java.nio.file.Files.deleteIfExists(f.toPath()); f.writeText(SERVER_BOX64_SCRIPT); f.setExecutable(true, false)
             }
         }
+        // ARM installs from before this fix: Wine's zlib1.dll (see ZLIB_BUILTIN)
+        if (sys.arch == "arm64" && !File(sys.root, "usr/lib/x86_64-linux-gnu/wine/x86_64-windows/zlib1.dll").exists()) sys.run(ZLIB_BUILTIN)
         listOf("windsystem-wine" to wineWrapper(sys.arch), "windsystem-wineserver" to serverWrapper(sys.arch)).forEach { (n, body) ->
             val f = File(sys.root, "usr/local/bin/$n")
             if (runCatching { f.readText() }.getOrNull() != body) { f.writeText(body); f.setExecutable(true, false) }

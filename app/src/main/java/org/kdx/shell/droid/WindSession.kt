@@ -65,6 +65,18 @@ class WindSession(
             sys.run("windsystem-wineserver -p </dev/null >/dev/null 2>&1; true", toLog, env = verbose)
             rc = sys.run(BOOT.replace("cat ", "tail -n 150 "), toLog, env = verbose)
         }
+        if (rc != 0 && !firstRun) {
+            // A drive C: that looks complete but Wine can't start in (e.g. built while a part of Wine was missing –
+            // "could not load kernel32.dll"): keep it aside (programs and files in it can still be copied out) and
+            // build a fresh one.
+            val aside = WindSystem.PREFIX + ".damaged-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
+            toLog("---- drive C: seems damaged; moving it to $aside and preparing a new one")
+            status("Drive C: was damaged – preparing a new one (the old one is kept)…")
+            sys.run("windsystem-wineserver -k 2>&1; true", toLog, env = env)
+            sys.run("mv ${WindSystem.PREFIX} $aside && mkdir -p ${WindSystem.PREFIX}; windsystem-wineserver -p </dev/null >/dev/null 2>&1; true", toLog, env = env)
+            rc = sys.run(BOOT, toLog, env = env)
+            if (rc == 0) toLog("---- new drive C: ready (the damaged one is in $aside inside DroidSystem)")
+        }
         if (rc != 0) throw java.io.IOException("Wine couldn't prepare drive C: (code $rc) – see ${startLog.path}")
         applySettings()
         status(null)
