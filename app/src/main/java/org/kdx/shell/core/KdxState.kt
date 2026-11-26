@@ -1186,6 +1186,10 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     fun changeTaskbarOverApps(on: Boolean) { taskbarOverApps = on; prefs.edit().putBoolean("taskbarOverApps", on).apply(); syncOverlay() }
     /** Whether KDX's own screen is in front (then its own taskbar shows, not the floating one). */
     var kdxInFront = true
+        set(v) {
+            if (v != field || v) { val t = System.currentTimeMillis(); if (v) openApps.kdxCameToFront(t) else openApps.kdxLeftFront(t) }
+            field = v
+        }
     fun syncOverlay() = org.kdx.shell.shell.OverlayTaskbar.sync(ctx, this, kdxInFront)
 
     /** Android apps the user maximised: they open maximised from then on. */
@@ -1247,8 +1251,9 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     private fun checkOpenAndroidApps() {
         if (!androidAppWindows || !AndroidWindows.hasUsageAccess(ctx)) return
         val now = System.currentTimeMillis()
-        val events = AndroidWindows.usageEvents(ctx, usageCheckedAt - 1000, now)
-        usageCheckedAt = now
+        // each event once: from just after the newest one already applied
+        val events = AndroidWindows.usageEvents(ctx, usageCheckedAt, now)
+        usageCheckedAt = (events.maxOfOrNull { it.third }?.plus(1) ?: usageCheckedAt).coerceAtMost(now)
         val known = androidApps.associateBy { it.pkg }
         openApps.apply(events) { it != ctx.packageName && it in known }
         val pkgs = openApps.packages

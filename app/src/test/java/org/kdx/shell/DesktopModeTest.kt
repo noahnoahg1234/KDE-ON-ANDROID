@@ -59,14 +59,25 @@ class AndroidWindowsTaskbarTest {
     @Test fun openAppsFollowUsageEvents() {
         val t = org.kdx.shell.core.OpenAppTracker()
         val apps = setOf("com.a", "com.b")
-        t.apply(listOf("com.a" to 1, "com.b" to 1, "org.kdx.shell" to 1, "com.android.systemui" to 1)) { it in apps }
+        val R = org.kdx.shell.core.OpenAppTracker.RESUMED; val S = org.kdx.shell.core.OpenAppTracker.STOPPED
+        t.apply(listOf(Triple("com.a", R, 1000L), Triple("com.b", R, 2000L), Triple("org.kdx.shell", R, 2100L), Triple("com.android.systemui", R, 2200L))) { it in apps }
         assertEquals(listOf("com.a", "com.b"), t.packages)
-        t.apply(listOf("com.a" to 2, "com.a" to 23)) { it in apps } // paused / stopped: window still open
-        assertEquals(listOf("com.a", "com.b"), t.packages)
-        t.apply(listOf("com.b" to 24)) { it in apps }                 // destroyed: window closed
+        // the user taps KDX's desktop: KDX comes in front and both windows are hidden behind it (stopped) – still open
+        t.kdxCameToFront(10_000)
+        t.apply(listOf(Triple("com.a", S, 10_300L), Triple("com.b", S, 10_400L))) { it in apps }
+        assertEquals("hidden behind KDX, not closed", listOf("com.a", "com.b"), t.packages)
+        // switching to b brings the windows up again (KDX leaves the front)
+        t.kdxLeftFront(20_000)
+        t.apply(listOf(Triple("com.a", R, 20_100L), Triple("com.b", R, 20_200L))) { it in apps }
+        // b's window is closed with its ✕ while KDX isn't in front: Android reports it as stopped – closed
+        t.apply(listOf(Triple("com.b", 2, 30_000L), Triple("com.b", S, 30_200L))) { it in apps }
+        assertEquals("closed window leaves the taskbar", listOf("com.a"), t.packages)
+        // a stop that arrives a moment after KDX came in front (events race a little) still counts as hidden
+        t.kdxCameToFront(40_000)
+        t.apply(listOf(Triple("com.a", S, 39_200L))) { it in apps }
         assertEquals(listOf("com.a"), t.packages)
-        t.apply(listOf("com.b" to 1)) { it in apps }                  // opened again
-        assertEquals(listOf("com.a", "com.b"), t.packages)
+        assertTrue(t.kdxInFrontAt(45_000))
+        assertFalse(t.kdxInFrontAt(25_000))
     }
 
     @Test fun maximizeLeavesTheTaskbarVisible() {

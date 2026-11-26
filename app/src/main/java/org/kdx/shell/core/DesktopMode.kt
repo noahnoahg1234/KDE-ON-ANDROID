@@ -105,12 +105,12 @@ object AndroidWindows {
         runCatching { ctx.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
     }
 
-    /** Android usage events since [since] (ms), as (package, type), oldest first. */
-    fun usageEvents(ctx: Context, since: Long, until: Long): List<Pair<String, Int>> = runCatching {
+    /** Android usage events since [since] (ms), as (package, type, time), oldest first. */
+    fun usageEvents(ctx: Context, since: Long, until: Long): List<Triple<String, Int, Long>> = runCatching {
         val usm = ctx.getSystemService(android.app.usage.UsageStatsManager::class.java)
         val ev = usm.queryEvents(since, until)
         val e = android.app.usage.UsageEvents.Event()
-        buildList { while (ev.hasNextEvent()) { ev.getNextEvent(e); add(e.packageName to e.eventType) } }
+        buildList { while (ev.hasNextEvent()) { ev.getNextEvent(e); add(Triple(e.packageName, e.eventType, e.timeStamp)) } }
     }.getOrDefault(emptyList())
 
     /** The screen area minus Android's own bars, from the system's dimensions (0 if unknown). */
@@ -143,28 +143,45 @@ enum class PanelPosition(val label: String) {
 /**
  * Which Android apps have open windows, from Android's usage events (needs "Usage access" – Android doesn't otherwise
  * tell an app which other apps are open). Kept free of Android classes so it can be tested.
+ *
+ * Android reports an activity being destroyed as "stopped" (it rewrites the event), and a window that's merely hidden
+ * – behind KDX's full-screen desktop – is stopped too. The difference is KDX: a window can only be hidden behind KDX
+ * while KDX is in front. So an app that stops while KDX isn't in front had its window closed.
  */
 class OpenAppTracker {
     /** Android's UsageEvents.Event types used here. */
     companion object {
         const val RESUMED = 1          // ACTIVITY_RESUMED (MOVE_TO_FOREGROUND)
-        const val DESTROYED = 24       // ACTIVITY_DESTROYED (Android 10+)
+        const val STOPPED = 23         // ACTIVITY_STOPPED – also what an activity's destruction is reported as
+        /** A stop this soon after KDX came in front still counts as "hidden behind KDX" (events arrive in order). */
+        const val GRACE_MS = 1500L
     }
 
     private val open = LinkedHashSet<String>()
-    /** Packages with an activity that was last seen resumed (until it's destroyed), oldest first. */
+    /** Packages with an open window, oldest first. */
     val packages: List<String> get() = open.toList()
 
+    /** Times (ms) KDX was in front: start to end (null = still in front). */
+    private val kdxFront = ArrayDeque<Pair<Long, Long?>>()
+
+    fun kdxCameToFront(t: Long) { if (kdxFront.lastOrNull()?.second != null || kdxFront.isEmpty()) kdxFront.addLast(t to null); trim(t) }
+    fun kdxLeftFront(t: Long) { kdxFront.removeLastOrNull()?.let { (s, e) -> kdxFront.addLast(s to (e ?: t)) } }
+
+    private fun trim(now: Long) { while (kdxFront.size > 1 && (kdxFront.first().second ?: now) < now - 10 * 60_000) kdxFront.removeFirst() }
+
+    /** True if KDX was in front at [t] (or had just come in front). */
+    fun kdxInFrontAt(t: Long): Boolean = kdxFront.any { (s, e) -> t >= s - GRACE_MS && (e == null || t <= e + GRACE_MS) }
+
     /**
-     * Applies events (package, type) in time order. [relevant] filters packages (apps with a launcher entry, not KDX).
-     * An app is open from its first resumed activity until its activities are destroyed (its window closed).
+     * Applies events (package, type, time ms) in time order. [relevant] filters packages (apps with a launcher entry,
+     * not KDX). An app is open from its first resumed activity until it stops while KDX isn't in front.
      */
-    fun apply(events: List<Pair<String, Int>>, relevant: (String) -> Boolean) {
-        for ((pkg, type) in events) {
+    fun apply(events: List<Triple<String, Int, Long>>, relevant: (String) -> Boolean) {
+        for ((pkg, type, t) in events) {
             if (!relevant(pkg)) continue
             when (type) {
-                RESUMED -> open += pkg
-                DESTROYED -> open -= pkg
+                RESUMED -> { open -= pkg; open += pkg } // most recently used last
+                STOPPED -> if (!kdxInFrontAt(t)) open -= pkg
             }
         }
     }
