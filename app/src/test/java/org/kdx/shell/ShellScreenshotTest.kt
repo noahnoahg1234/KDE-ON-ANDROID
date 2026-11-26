@@ -11,6 +11,9 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -277,6 +280,27 @@ class ShellScreenshotTest {
             assertTrue("${app.name}: $log", !log.contains("error", ignoreCase = true))
             assertTrue("${app.name}: toast $toast", toast == null || !toast.contains("wrong"))
         }
+    }
+
+    @Test fun addAndRemoveWidgets() {
+        assertEquals("default widgets", listOf("CLOCK", "SYSTEM", "NOTE"), state.desktopWidgets.map { it.type.name })
+        rule.runOnUiThread { state.widgetExplorerOpen = true }
+        shot("80-add-widgets")
+        rule.onNodeWithText("Calendar").performClick()
+        rule.onAllNodesWithText("Add")[0].performClick() // Analog Clock (Digital Clock is already on the desktop)
+        rule.onNodeWithText("Done").performClick()
+        rule.mainClock.advanceTimeBy(500)
+        assertTrue(state.desktopWidgets.any { it.type == org.kdx.shell.core.WidgetType.CALENDAR })
+        assertTrue(state.desktopWidgets.any { it.type == org.kdx.shell.core.WidgetType.ANALOG_CLOCK })
+        rule.runOnUiThread { state.addWidget(org.kdx.shell.core.WidgetType.BATTERY); state.addWidget(org.kdx.shell.core.WidgetType.NOTE) }
+        assertEquals("a second note has its own text", "", state.desktopWidgets.last().text)
+        shot("81-widgets")
+        // long-press a widget → Remove
+        rule.onNodeWithText("System").performTouchInput { longClick() }
+        rule.mainClock.advanceTimeBy(800)
+        rule.onNodeWithText("Remove System Load").performClick()
+        rule.mainClock.advanceTimeBy(300)
+        assertTrue(state.desktopWidgets.none { it.type == org.kdx.shell.core.WidgetType.SYSTEM })
     }
 
     @Test fun pcDesktop() {

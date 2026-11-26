@@ -163,6 +163,13 @@ X apps only understand a mouse, so touches are translated (`TouchTranslator`):
   Ctrl/Alt/Super shortcuts work, and AltGr characters (@, €…) come out right. The on-screen keyboard stays down
   while a hardware keyboard is connected.
 
+## Desktop widgets
+
+Long-press the desktop → **Add Widgets…** opens the widget picker: Digital Clock, Analog Clock, Calendar, System Load,
+Battery and Sticky Note (as many notes as you like; the first one is shared with the Notes app). Long-press a widget
+to **move** it earlier/later or **remove** it. System Settings → Widgets lists them too. Many widgets scroll and never
+take more than half the desktop, so the app icons stay visible.
+
 ## Desktop resolution and PC desktop
 
 System Settings → **Desktop**:

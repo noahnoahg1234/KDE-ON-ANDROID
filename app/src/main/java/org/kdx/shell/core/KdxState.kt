@@ -114,9 +114,33 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     var wallpaperVersion by mutableIntStateOf(0)
     var desktopCount by mutableIntStateOf(prefs.getInt("desktops", 4))
     var floatingByDefault by mutableStateOf(prefs.getBoolean("floating", false))
-    var showClockWidget by mutableStateOf(prefs.getBoolean("wClock", true))
-    var showNotesWidget by mutableStateOf(prefs.getBoolean("wNotes", true))
-    var showSystemWidget by mutableStateOf(prefs.getBoolean("wSystem", true))
+    /** Widgets on the desktop, in order (long-press the desktop → Add Widgets…; long-press a widget to remove it). */
+    val desktopWidgets = mutableStateListOf<DesktopWidget>().apply {
+        val saved = prefs.getString("widgets", null)
+        addAll(if (saved != null) DesktopWidget.parse(saved)
+            else DesktopWidget.fromOldSwitches(prefs.getBoolean("wClock", true), prefs.getBoolean("wSystem", true), prefs.getBoolean("wNotes", true)))
+    }
+    private var nextWidgetId = (desktopWidgets.maxOfOrNull { it.id } ?: 0) + 1
+    /** The "Add Widgets" picker is open. */
+    var widgetExplorerOpen by mutableStateOf(false)
+
+    fun canAddWidget(t: WidgetType) = t.multiple || desktopWidgets.none { it.type == t }
+
+    fun addWidget(t: WidgetType) {
+        if (!canAddWidget(t)) return
+        // the first note is the one shared with the Notes app; more notes get their own text
+        val text = if (t == WidgetType.NOTE && desktopWidgets.any { it.type == WidgetType.NOTE && it.text == null }) "" else null
+        desktopWidgets.add(DesktopWidget(nextWidgetId++, t, text)); save()
+    }
+
+    fun removeWidget(w: DesktopWidget) { desktopWidgets.remove(w); save() }
+
+    /** Moves [w] [by] places (negative = earlier). */
+    fun moveWidget(w: DesktopWidget, by: Int) {
+        val i = desktopWidgets.indexOf(w); if (i < 0) return
+        val j = (i + by).coerceIn(0, desktopWidgets.lastIndex)
+        if (i != j) { desktopWidgets.removeAt(i); desktopWidgets.add(j, w); save() }
+    }
     var showDesktopIcons by mutableStateOf(prefs.getBoolean("icons", true))
     var use24h by mutableStateOf(prefs.getBoolean("h24", true))
     var panelOnTop by mutableStateOf(prefs.getBoolean("panelTop", false))
@@ -855,9 +879,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         .putBoolean("customWallpaper", customWallpaper)
         .putInt("desktops", desktopCount)
         .putBoolean("floating", floatingByDefault)
-        .putBoolean("wClock", showClockWidget)
-        .putBoolean("wNotes", showNotesWidget)
-        .putBoolean("wSystem", showSystemWidget)
+        .putString("widgets", DesktopWidget.serialize(desktopWidgets))
         .putBoolean("icons", showDesktopIcons)
         .putBoolean("h24", use24h)
         .putBoolean("panelTop", panelOnTop)
@@ -1039,11 +1061,12 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         krunnerOpen = false
         overviewOpen = false
         calendarOpen = false
+        widgetExplorerOpen = false
     }
 
     /** Back button: close menus first, then the active window. Returns false if nothing to do. */
     fun back(): Boolean {
-        if (kickoffOpen || krunnerOpen || overviewOpen || calendarOpen) {
+        if (kickoffOpen || krunnerOpen || overviewOpen || calendarOpen || widgetExplorerOpen) {
             closeMenus(); return true
         }
         activeWindow?.let { minimize(it); return true }

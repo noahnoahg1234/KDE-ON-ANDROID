@@ -84,6 +84,7 @@ private fun ShellContent(state: KdxState) {
             Kickoff(state, compact)
         }
         if (state.calendarOpen) CalendarPopup(state)
+        WidgetExplorer(state)
         AnimatedVisibility(state.krunnerOpen, enter = fadeIn(), exit = fadeOut()) {
             KRunner(state)
         }
@@ -232,7 +233,8 @@ private fun DesktopLayer(state: KdxState, compact: Boolean) {
     ) {
         if (state.pcDesktop) PcDesktop(state)
         else Column(Modifier.fillMaxSize().padding(12.dp)) {
-            Widgets(state, compact)
+            // many widgets scroll, and never take more than half the desktop (the app icons stay visible)
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) { Widgets(state, compact) }
             if (state.showDesktopIcons) {
                 val favs = state.favorites.mapNotNull { state.resolve(it) }
                 LazyVerticalGrid(
@@ -247,6 +249,7 @@ private fun DesktopLayer(state: KdxState, compact: Boolean) {
         }
         DesktopIndicator(state, Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp))
         DropdownMenu(menu, { menu = false }, offset = androidx.compose.ui.unit.DpOffset(16.dp, 0.dp)) {
+            DropdownMenuItem(text = { Text("Add Widgets…") }, onClick = { menu = false; state.widgetExplorerOpen = true })
             DropdownMenuItem(text = { Text("Configure Desktop and Wallpaper…") }, onClick = { menu = false; state.open(KApp.SETTINGS, "wallpaper") })
             DropdownMenuItem(text = { Text("Open Terminal") }, onClick = { menu = false; state.open(KApp.KONSOLE) })
             DropdownMenuItem(text = { Text("Open Home Folder") }, onClick = { menu = false; state.open(KApp.DOLPHIN) })
@@ -262,7 +265,7 @@ private fun DesktopLayer(state: KdxState, compact: Boolean) {
 @Composable
 private fun PcDesktop(state: KdxState) {
     BoxWithConstraints(Modifier.fillMaxSize().padding(8.dp)) {
-        val widgets = state.showClockWidget || state.showNotesWidget || state.showSystemWidget
+        val widgets = state.desktopWidgets.isNotEmpty()
         val wideEnough = maxWidth > 520.dp
         if (state.showDesktopIcons) {
             val favs = state.favorites.mapNotNull { state.resolve(it) }
@@ -275,7 +278,7 @@ private fun PcDesktop(state: KdxState) {
                 items(favs, key = { it.key }) { AppTile(state, it, iconSize = 40.dp, textColor = Color.White, shadow = true) }
             }
         }
-        if (widgets && wideEnough) Column(Modifier.align(Alignment.TopEnd).width(240.dp)) { Widgets(state, compact = true) }
+        if (widgets && wideEnough) Column(Modifier.align(Alignment.TopEnd).width(240.dp).verticalScroll(rememberScrollState())) { Widgets(state, compact = true) }
     }
 }
 

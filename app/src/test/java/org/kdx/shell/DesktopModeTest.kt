@@ -25,3 +25,27 @@ class DesktopModeTest {
         assertTrue(portrait.right <= 1080 && portrait.bottom <= 2400)
     }
 }
+
+class DesktopWidgetsTest {
+    @Test fun savedAndLoaded() {
+        val list = listOf(
+            org.kdx.shell.core.DesktopWidget(1, org.kdx.shell.core.WidgetType.CLOCK),
+            org.kdx.shell.core.DesktopWidget(2, org.kdx.shell.core.WidgetType.NOTE),               // shared with the Notes app
+            org.kdx.shell.core.DesktopWidget(3, org.kdx.shell.core.WidgetType.NOTE, "Buy milk | eggs\nline 2"), // its own text
+            org.kdx.shell.core.DesktopWidget(4, org.kdx.shell.core.WidgetType.CALENDAR),
+        )
+        val back = org.kdx.shell.core.DesktopWidget.parse(org.kdx.shell.core.DesktopWidget.serialize(list))
+        assertEquals(list.map { it.type }, back.map { it.type })
+        assertEquals(listOf(null, null, "Buy milk | eggs\nline 2", null), back.map { it.text })
+        assertTrue("ids unique", back.map { it.id }.toSet().size == 4)
+        assertTrue("unknown entries skipped", org.kdx.shell.core.DesktopWidget.parse("CLOCK|WEATHER|BATTERY").map { it.type } ==
+            listOf(org.kdx.shell.core.WidgetType.CLOCK, org.kdx.shell.core.WidgetType.BATTERY))
+        assertTrue("empty = no widgets", org.kdx.shell.core.DesktopWidget.parse("").isEmpty())
+    }
+
+    @Test fun oldSettingsCarryOver() {
+        val w = org.kdx.shell.core.DesktopWidget.fromOldSwitches(clock = true, system = false, note = true)
+        assertEquals(listOf(org.kdx.shell.core.WidgetType.CLOCK, org.kdx.shell.core.WidgetType.NOTE), w.map { it.type })
+        assertNull("the old note stays linked to the Notes app", w[1].text)
+    }
+}

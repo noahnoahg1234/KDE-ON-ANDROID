@@ -317,9 +317,14 @@ fun SystemSettings(state: KdxState, w: KWindow) {
             Toggle("Show favorites as desktop icons", state.showDesktopIcons) { set { state.showDesktopIcons = it } }
         }
         Section("Widgets", Icons.Filled.Widgets) {
-            Toggle("Digital Clock", state.showClockWidget) { set { state.showClockWidget = it } }
-            Toggle("System Load", state.showSystemWidget) { set { state.showSystemWidget = it } }
-            Toggle("Sticky Note", state.showNotesWidget) { set { state.showNotesWidget = it } }
+            if (state.desktopWidgets.isEmpty()) Text("No widgets on the desktop.", color = c.inactiveText, fontSize = 13.sp)
+            state.desktopWidgets.toList().forEach { dw ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(dw.type.title, Modifier.weight(1f), color = c.text, fontSize = 14.sp)
+                    TextButton({ state.removeWidget(dw) }) { Text("Remove") }
+                }
+            }
+            OutlinedButton({ state.widgetExplorerOpen = true }) { Text("Add Widgets…") }
         }
         Section("Date & Time", Icons.Filled.Schedule) {
             Toggle("24-hour clock", state.use24h) { set { state.use24h = it } }
