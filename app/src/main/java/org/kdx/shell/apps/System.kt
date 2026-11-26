@@ -407,7 +407,7 @@ private fun DesktopSection(state: KdxState) {
         }
         Spacer(Modifier.height(8.dp))
         Toggle("PC desktop (icons in columns, pinned apps on the taskbar, floating windows)", state.pcDesktop) { state.changePcDesktop(it) }
-        Toggle("Open Android apps in windows", state.androidAppWindows) { state.androidAppWindows = it; state.save() }
+        Toggle("Open Android apps in windows", state.androidAppWindows) { state.androidAppWindows = it; state.save(); state.syncOverlay() }
         if (state.androidAppWindows) {
             // read again every time (the user may just have come back from Developer options)
             val supported = org.kdx.shell.core.AndroidWindows.supported(ctx)
@@ -418,6 +418,14 @@ private fun DesktopSection(state: KdxState) {
                 else "Android app windows you open from KDX show on its taskbar. To also see apps opened another way – and have " +
                     "them leave the taskbar when closed – allow KDX \"Usage access\".", color = c.inactiveText, fontSize = 12.sp)
             if (!usage) OutlinedButton({ org.kdx.shell.core.AndroidWindows.openUsageAccess(ctx) }) { Text("Allow Usage access") }
+            Toggle("Taskbar over Android apps (keeps all their windows visible)", state.taskbarOverApps) { state.changeTaskbarOverApps(it) }
+            if (state.taskbarOverApps && !org.kdx.shell.shell.OverlayTaskbar.canShow(ctx)) {
+                Text("KDX fills the screen, so touching it hides Android app windows behind it. A taskbar floating over the " +
+                    "apps doesn't: allow KDX to \"Display over other apps\".", color = c.inactiveText, fontSize = 12.sp)
+                OutlinedButton({ org.kdx.shell.shell.OverlayTaskbar.openPermission(ctx) }) { Text("Allow display over other apps") }
+            }
+            if (!usage) Text("Allow Usage access too: then opening or switching to an app brings all open windows back up " +
+                "(up to as many apps as your phone's memory holds).", color = c.inactiveText, fontSize = 12.sp)
             val wc = org.kdx.shell.droid.WindowControlService.isOn
             Text(if (wc) "KDX Window Control is on: Maximize and Restore size resize open Android windows."
                 else "Maximize makes an app open maximised. To resize windows that are already open, turn on \"KDX Window " +

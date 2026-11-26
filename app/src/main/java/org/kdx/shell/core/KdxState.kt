@@ -1129,7 +1129,14 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         } else null
         runCatching { ctx.startActivity(intent, opts) }
             .recoverCatching { if (opts != null) ctx.startActivity(intent) else throw it }
-            .onSuccess { if (opts != null) trackAndroidWindow(a) }
+            .onSuccess {
+                if (opts != null) {
+                    val wasOpen = androidWindows.any { it.pkg == a.pkg }
+                    trackAndroidWindow(a)
+                    // KDX came to the front to open it, covering the other windows: bring them back up, this one on top
+                    if (androidWindows.size > 1) restack(a, delayMs = if (wasOpen) 0 else 700)
+                }
+            }
             .onFailure { toast("Could not start ${a.label}") }
     }
 
@@ -1144,13 +1151,42 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         if (androidWindows.none { it.pkg == a.pkg }) androidWindows.add(a)
     }
 
-    /** Brings an Android app's window to the front (Android keeps its size and place). */
-    fun focusAndroidWindow(a: AndroidApp) {
-        runCatching {
-            ctx.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(ComponentName(a.pkg, a.cls))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED))
-        }.onFailure { toast("Could not open ${a.label}") }
+    /** Brings an Android app's window to the front (Android keeps its size and place), the others with it. */
+    fun focusAndroidWindow(a: AndroidApp) = restack(a)
+
+    private fun bringToFront(a: AndroidApp) = runCatching {
+        ctx.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(ComponentName(a.pkg, a.cls))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED))
+    }.isSuccess
+
+    /**
+     * KDX fills the screen, and whenever it's touched Android brings it in front of every floating window – which
+     * hid all but the newest app. So bringing up one window brings up all open ones (oldest first, [top] last).
+     * Only with Usage access: then KDX knows which apps are really still open (bringing up a closed one would open
+     * it again).
+     */
+    private fun restack(top: AndroidApp, delayMs: Long = 0) {
+        val others = if (AndroidWindows.hasUsageAccess(ctx)) androidWindows.filter { it.pkg != top.pkg } else emptyList()
+        val h = android.os.Handler(android.os.Looper.getMainLooper())
+        (others + top).forEachIndexed { i, w ->
+            h.postDelayed({ if (!bringToFront(w) && w === top) toast("Could not open ${w.label}") }, delayMs + i * 150L)
+        }
     }
+
+    /** Shows KDX's own desktop (from the taskbar floating over apps). */
+    fun bringKdxToFront() {
+        runCatching {
+            ctx.startActivity(Intent(ctx, org.kdx.shell.MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+        }
+    }
+
+    /** KDX's taskbar floats over Android apps (System Settings → Desktop; needs "Display over other apps"). */
+    var taskbarOverApps by mutableStateOf(prefs.getBoolean("taskbarOverApps", true)); private set
+    fun changeTaskbarOverApps(on: Boolean) { taskbarOverApps = on; prefs.edit().putBoolean("taskbarOverApps", on).apply(); syncOverlay() }
+    /** Whether KDX's own screen is in front (then its own taskbar shows, not the floating one). */
+    var kdxInFront = true
+    fun syncOverlay() = org.kdx.shell.shell.OverlayTaskbar.sync(ctx, this, kdxInFront)
 
     /** Android apps the user maximised: they open maximised from then on. */
     private val maximizedApps = mutableStateListOf<String>().apply {

@@ -105,3 +105,55 @@ class MaximizedAndroidAppTest {
         assertFalse(state.isMaximized(a))
     }
 }
+
+@org.junit.runner.RunWith(org.robolectric.RobolectricTestRunner::class)
+@org.robolectric.annotation.Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+class ManyAndroidWindowsTest {
+    private val app = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.app.Application>()
+
+    private fun allowUsageAccess() {
+        val ops = app.getSystemService(android.app.AppOpsManager::class.java)
+        org.robolectric.Shadows.shadowOf(ops).setMode(43 /* OP_GET_USAGE_STATS */, android.os.Process.myUid(), app.packageName, android.app.AppOpsManager.MODE_ALLOWED)
+    }
+
+    /** Switching to one app brings all open windows back above KDX – the chosen one last, so it's on top. */
+    @Test fun switchingBringsAllWindowsUp() {
+        android.provider.Settings.Global.putInt(app.contentResolver, "enable_freeform_support", 1)
+        allowUsageAccess()
+        assertTrue(org.kdx.shell.core.AndroidWindows.hasUsageAccess(app))
+        val state = org.kdx.shell.core.KdxState(app)
+        state.androidAppWindows = true
+        val apps = (1..10).map { org.kdx.shell.core.AndroidApp("App $it", "com.app$it", "Main", null) }
+        apps.forEach { state.androidWindows.add(it) }
+        val shadow = org.robolectric.Shadows.shadowOf(app)
+        while (shadow.nextStartedActivity != null) {}
+        // how this test double reports order: start "first", then "second"
+        app.startActivity(android.content.Intent().setClassName("first", "A").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        app.startActivity(android.content.Intent().setClassName("second", "A").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        assertEquals("newest start is returned first", "second", shadow.nextStartedActivity.component!!.packageName)
+        while (shadow.nextStartedActivity != null) {}
+        state.focusAndroidWindow(apps[3])
+        org.robolectric.shadows.ShadowLooper.idleMainLooper(5, java.util.concurrent.TimeUnit.SECONDS)
+        // Robolectric returns the newest start first: reverse to get the order they were started in
+        val started = generateSequence { shadow.nextStartedActivity }.map { it.component!!.packageName }.toList().reversed()
+        assertEquals("all 10 windows brought up", 10, started.size)
+        assertEquals("the chosen app ends on top", "com.app4", started.last())
+        assertEquals(apps.map { it.pkg }.toSet(), started.toSet())
+    }
+
+    /** The taskbar floats over the apps while they're in front of KDX, and goes away when KDX is in front. */
+    @Test fun floatingTaskbarOnlyOverApps() {
+        android.provider.Settings.Global.putInt(app.contentResolver, "enable_freeform_support", 1)
+        org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(true)
+        val state = org.kdx.shell.core.KdxState(app)
+        state.androidAppWindows = true
+        val wm = org.robolectric.shadow.api.Shadow.extract<org.robolectric.shadows.ShadowWindowManagerImpl>(app.getSystemService(android.view.WindowManager::class.java))
+        org.kdx.shell.shell.OverlayTaskbar.sync(app, state, kdxInFront = false)
+        assertEquals("shown over the apps", 1, wm.views.size)
+        org.kdx.shell.shell.OverlayTaskbar.sync(app, state, kdxInFront = true)
+        assertEquals("KDX in front: its own taskbar", 0, wm.views.size)
+        org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(false)
+        org.kdx.shell.shell.OverlayTaskbar.sync(app, state, kdxInFront = false)
+        assertEquals("not without the permission", 0, wm.views.size)
+    }
+}

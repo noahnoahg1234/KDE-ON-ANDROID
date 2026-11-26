@@ -55,7 +55,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onResume() { super.onResume(); log("KDX in front"); hiddenSinceFront = false; regained() }
+    override fun onResume() {
+        super.onResume(); log("KDX in front"); hiddenSinceFront = false; regained()
+        // the taskbar over Android apps (permission may just have been given in Android's settings)
+        if (desktopShown) runCatching { state.kdxInFront = true; state.syncOverlay() }
+    }
 
     override fun onStop() {
         super.onStop(); log("KDX hidden")
@@ -116,7 +120,11 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         lostScreen("KDX paused")
-        if (desktopShown) state.save()
+        if (desktopShown) {
+            state.save()
+            // an Android app window came in front: KDX's taskbar floats over it
+            runCatching { state.kdxInFront = false; state.syncOverlay() }
+        }
     }
 
     override fun onDestroy() {

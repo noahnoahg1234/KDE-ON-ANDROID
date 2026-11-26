@@ -196,6 +196,12 @@ System Settings → **Desktop**:
 - **Open Android apps in windows**: Android apps open in floating, resizable windows using Android's own freeform
   mode. Phones ship with it switched off: turn on Developer options → *Enable freeform windows* (and *Force
   activities to be resizable*) once and restart the phone; until then Android apps open full screen as usual.
+- **Many Android apps open at once**: KDX fills the screen, and whenever it's touched Android brings it in front of
+  every floating window. So while Android app windows are in front, KDX's taskbar **floats over them** (allow
+  *Display over other apps*): K opens KDX's desktop and Kickoff, the grid button lists all apps, then pinned apps and
+  the open windows (long-press: Maximize / Restore / Remove) – using it never covers the windows. And with **Usage
+  access** allowed, opening or switching to an app brings **all** open windows back up (oldest first, that app on
+  top), however many there are.
 - **Android app windows on the taskbar** (and in the side dock): tap to bring one to the front; long-press for
   **Maximize** (fills the desktop and keeps KDX's taskbar visible – the maximize button Android draws on the window
   makes the app full screen over everything), *Restore size*, *App info* and *Remove from taskbar*. Android sets a
