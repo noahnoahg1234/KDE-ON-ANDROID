@@ -22,6 +22,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -91,7 +94,10 @@ object OverlayTaskbar {
             WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT,
+            // NOT_FOCUSABLE alone puts the window above the on-screen keyboard (it covered the keyboard's bottom row);
+            // with ALT_FOCUSABLE_IM it goes below the keyboard
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM,
+            PixelFormat.TRANSLUCENT,
         ).apply { gravity = if (state.panelPosition == org.kdx.shell.core.PanelPosition.TOP) Gravity.TOP else Gravity.BOTTOM }
         runCatching { wm.addView(v, lp); view = v; owner = o }
     }
@@ -123,6 +129,19 @@ object OverlayTaskbar {
 private fun OverlayBar(state: KdxState) {
     val c = LocalBreeze.current
     var apps by remember { mutableStateOf(false) }
+    // collapsed: just a small tab in the corner (for apps that need the bottom of the screen)
+    var collapsed by remember { mutableStateOf(false) }
+    if (collapsed) {
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomEnd) {
+            Box(
+                Modifier.padding(6.dp).size(36.dp).clip(RoundedCornerShape(18.dp)).background(c.accent.copy(alpha = 0.85f))
+                    .clickable { collapsed = false }
+                    .semantics { contentDescription = "Show taskbar" },
+                contentAlignment = Alignment.Center,
+            ) { Text("K", color = Color.White, fontSize = 16.sp) }
+        }
+        return
+    }
     var menuFor by remember { mutableStateOf<AndroidApp?>(null) }
     Column(Modifier.fillMaxWidth()) {
         if (apps) {
@@ -184,6 +203,8 @@ private fun OverlayBar(state: KdxState) {
                 }
             }
             Text(formatTime(rememberNow(), state.use24h, false), color = c.panelText, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 6.dp))
+            Icon(Icons.Filled.KeyboardArrowDown, "Hide taskbar", tint = c.panelText,
+                modifier = Modifier.size(36.dp).clip(RoundedCornerShape(6.dp)).clickable { apps = false; collapsed = true }.padding(6.dp))
         }
     }
 }

@@ -58,13 +58,15 @@ object AndroidWindows {
     }
 
     /** Where the [n]th window opens on a [w] × [h] px screen: cascaded like a PC's new windows. */
-    fun bounds(n: Int, w: Int, h: Int): Rect {
-        val ww = (w * 0.62f).toInt().coerceAtLeast(minOf(w, 600))
-        val wh = (h * 0.7f).toInt().coerceAtLeast(minOf(h, 500))
-        val step = (minOf(w, h) * 0.04f).toInt().coerceAtLeast(24)
+    fun bounds(n: Int, w: Int, h: Int, area: Rect = Rect(0, 0, w, h)): Rect {
+        // inside [area] (the desktop: not under KDX's taskbar)
+        val aw = area.width(); val ah = area.height()
+        val ww = (aw * 0.62f).toInt().coerceAtLeast(minOf(aw, 600))
+        val wh = (ah * 0.7f).toInt().coerceAtLeast(minOf(ah, 500))
+        val step = (minOf(aw, ah) * 0.04f).toInt().coerceAtLeast(24)
         val k = n % 6
-        val left = (w / 12 + k * step).coerceAtMost((w - ww).coerceAtLeast(0))
-        val top = (h / 12 + k * step).coerceAtMost((h - wh).coerceAtLeast(0))
+        val left = area.left + (aw / 12 + k * step).coerceAtMost((aw - ww).coerceAtLeast(0))
+        val top = area.top + (ah / 12 + k * step).coerceAtMost((ah - wh).coerceAtLeast(0))
         return Rect(left, top, left + ww, top + wh)
     }
 

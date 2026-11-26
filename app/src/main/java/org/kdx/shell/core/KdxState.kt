@@ -1125,7 +1125,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
             val dm = ctx.resources.displayMetrics
             // apps you maximised open maximised (Android applies a window's size only when the app opens)
             AndroidWindows.options(if (a.pkg in maximizedApps) desktopMargins().bounds(dm.widthPixels, dm.heightPixels)
-                else AndroidWindows.bounds(androidWindowCount++, dm.widthPixels, dm.heightPixels))
+                else AndroidWindows.bounds(androidWindowCount++, dm.widthPixels, dm.heightPixels, desktopMargins().bounds(dm.widthPixels, dm.heightPixels)))
         } else null
         runCatching { ctx.startActivity(intent, opts) }
             .recoverCatching { if (opts != null) ctx.startActivity(intent) else throw it }
@@ -1212,7 +1212,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     fun restoreAndroidWindow(a: AndroidApp) {
         if (maximizedApps.remove(a.pkg)) saveMaximized()
         val dm = ctx.resources.displayMetrics
-        placeAndroidWindow(a, AndroidWindows.bounds(androidWindowCount++, dm.widthPixels, dm.heightPixels), "back to a normal size")
+        placeAndroidWindow(a, AndroidWindows.bounds(androidWindowCount++, dm.widthPixels, dm.heightPixels, desktopMargins().bounds(dm.widthPixels, dm.heightPixels)), "back to a normal size")
     }
 
     private fun placeAndroidWindow(a: AndroidApp, target: android.graphics.Rect, what: String) {

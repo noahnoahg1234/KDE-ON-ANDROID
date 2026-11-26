@@ -21,6 +21,9 @@ class DesktopModeTest {
         val all = (0 until 12).map { AndroidWindows.bounds(it, 2400, 1080) }
         all.forEach { r -> assertTrue("$r", r.left >= 0 && r.top >= 0 && r.right <= 2400 && r.bottom <= 1080 && r.width() > 0 && r.height() > 0) }
         assertNotEquals(all[0], all[1])
+        // inside the desktop area: never under KDX's taskbar
+        val area = android.graphics.Rect(0, 63, 1080, 2400 - 63 - 126)
+        (0 until 12).map { AndroidWindows.bounds(it, 1080, 2400, area) }.forEach { r -> assertTrue("$r", area.contains(r)) }
         val portrait = AndroidWindows.bounds(0, 1080, 2400)
         assertTrue(portrait.right <= 1080 && portrait.bottom <= 2400)
     }
@@ -150,6 +153,10 @@ class ManyAndroidWindowsTest {
         val wm = org.robolectric.shadow.api.Shadow.extract<org.robolectric.shadows.ShadowWindowManagerImpl>(app.getSystemService(android.view.WindowManager::class.java))
         org.kdx.shell.shell.OverlayTaskbar.sync(app, state, kdxInFront = false)
         assertEquals("shown over the apps", 1, wm.views.size)
+        val lp = wm.views[0].layoutParams as android.view.WindowManager.LayoutParams
+        assertTrue("goes below the on-screen keyboard (never covers it)",
+            lp.flags and android.view.WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM != 0 &&
+                lp.flags and android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0)
         org.kdx.shell.shell.OverlayTaskbar.sync(app, state, kdxInFront = true)
         assertEquals("KDX in front: its own taskbar", 0, wm.views.size)
         org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(false)
