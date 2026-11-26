@@ -236,7 +236,7 @@ class DebianSystem(
         File(apt, "apt.conf.d").mkdirs()
         File(apt, "apt.conf.d/99droidsystem").writeText(
             "// proot can't switch users, so apt's download sandbox runs as root\n" +
-                "APT::Sandbox::User \"root\";\nAcquire::Retries \"3\";\nDpkg::Use-Pty \"false\";\n" +
+                "APT::Sandbox::User \"root\";\nAcquire::Retries \"10\";\nDpkg::Use-Pty \"false\";\n" +
                 "APT::Install-Recommends \"false\";\nDpkg::Options { \"--force-confold\"; };\n"
         )
         writeDpkgConfig()
@@ -270,8 +270,9 @@ class DebianSystem(
         tool("display-setup", """#!/bin/sh
             |# Installs the X display server used by KDX's Linux Display window.
             |set -e
+            |$APT_INSTALL_FN
             |apt-get update
-            |apt-get install -y tigervnc-standalone-server openbox dbus dbus-x11 x11-xserver-utils x11-utils xdotool fonts-dejavu-core adwaita-icon-theme \
+            |apt_install tigervnc-standalone-server openbox dbus dbus-x11 x11-xserver-utils x11-utils xdotool fonts-dejavu-core adwaita-icon-theme \
             |  pulseaudio pulseaudio-utils libasound2-plugins
             |echo "Display server ready. Linux apps with windows now open in KDX's Linux Display."
             |""".trimMargin())
@@ -338,7 +339,7 @@ class DebianSystem(
 
     companion object {
         /** Bump when applyDroidLayer changes. 2: app-window Openbox config, xdotool/dbus in display-setup. */
-        const val LAYER_VERSION = 10 // 10: droidsystem-pack; 3: bwrap stand-in, 4: sound, 5: plasma-setup, 6: dpkg excludes, 7: bazaar-setup, 8: windsystem
+        const val LAYER_VERSION = 11 // 11: installers retry (phone networks drop), Plasma X11 session on Ubuntu; 10: droidsystem-pack; 3: bwrap stand-in, 4: sound, 5: plasma-setup, 6: dpkg excludes, 7: bazaar-setup, 8: windsystem
 
         val DPKG_CONFIG = """force-unsafe-io
             |path-exclude=/usr/share/locale/*
@@ -352,6 +353,24 @@ class DebianSystem(
             |path-exclude=/usr/share/lintian/*
             |path-exclude=/usr/share/linda/*
             |""".trimMargin()
+
+        /**
+         * `apt_install PACKAGES…` for setup scripts: a big download (KDE Plasma is ~320 MB) on a phone's Wi-Fi or mobile
+         * data often breaks once; instead of failing the whole setup, try again up to 4 times – apt keeps what it already
+         * downloaded, so each try continues where the last one stopped.
+         */
+        const val APT_INSTALL_FN = """apt_install() {
+  try=1
+  while :; do
+    if apt-get -q install -y --no-install-recommends -o Dpkg::Progress-Fancy=0 "${'$'}@"; then return 0; fi
+    [ ${'$'}try -ge 4 ] && { echo "Installing failed 4 times. Check the internet connection and run this again – it continues where it stopped."; return 1; }
+    echo "Download or install problem (try ${'$'}try of 4) – trying again in 5 seconds, continuing where it stopped…"
+    try=${'$'}((try + 1)); sleep 5
+    dpkg --configure -a || true
+    apt-get -q update || true
+  done
+}
+"""
 
         /** Extracts a tar stream into [dest] preserving symlinks, hard links (as copies) and permission bits. */
         fun extractTar(input: InputStream, dest: File) {

@@ -33,16 +33,17 @@ object WindSystem {
 
     /** The packages / setup script for `windsystem-setup`. */
     fun setupScript(): String = """#!/bin/bash
-# Installs WindSystem: Wine (plus box64 on ARM phones) from Debian, and its helper commands.
+# Installs WindSystem: Wine (plus box64 on ARM phones) from Ubuntu/Debian, and its helper commands.
 set -e
 arch=${'$'}(dpkg --print-architecture)
+${DebianSystem.APT_INSTALL_FN}
 echo "Installing WindSystem for ${'$'}arch…"
 command -v Xvnc >/dev/null 2>&1 || display-setup
 case "${'$'}arch" in
   amd64)
     dpkg --add-architecture i386
     apt-get -q update
-    apt-get -q install -y --no-install-recommends -o Dpkg::Progress-Fancy=0 wine wine64 wine32:i386 libwine libwine:i386 fonts-wine \
+    apt_install wine wine64 wine32:i386 libwine libwine:i386 fonts-wine \
       winbind xdotool x11-utils openbox fonts-liberation2 dosbox-x
     cat > /usr/local/bin/windsystem-wine <<'WRAP'
 ${wineWrapper("amd64")}WRAP
@@ -53,8 +54,8 @@ ${serverWrapper("amd64")}WRAP
     # Windows programs are x86: box64 translates x86_64 code to ARM; Wine and its libraries are Debian's amd64 packages
     dpkg --add-architecture amd64
     apt-get -q update
-    apt-get -q install -y --no-install-recommends -o Dpkg::Progress-Fancy=0 box64 xdotool x11-utils openbox fonts-liberation2 dosbox-x
-    apt-get -q install -y --no-install-recommends -o Dpkg::Progress-Fancy=0 wine64:amd64 libwine:amd64 fonts-wine
+    apt_install box64 xdotool x11-utils openbox fonts-liberation2 dosbox-x
+    apt_install wine64:amd64 libwine:amd64 fonts-wine
     # Wine starts its server through Debian's /usr/lib/wine/wineserver *shell script*, which runs wineserver64 directly –
     # an x86_64 program the phone can't run, and box64 can't step in from a script. So wineserver64 itself becomes a
     # small script that runs the real one (diverted, so upgrades keep working) through box64.

@@ -122,7 +122,7 @@ echo "Bazaar is installed. Open it from KDE Plasma's menu or desktop."
 
     /** Shell script for `plasma-setup` (Konsole): installs Plasma, working around what doesn't apply inside proot. */
     fun setupScript(): String = """#!/bin/sh
-# Installs the real KDE Plasma 6 desktop (Debian's packages) into DroidSystem.
+# Installs the real KDE Plasma 6 desktop (Ubuntu's or Debian's packages) into DroidSystem.
 set -e
 command -v Xvnc >/dev/null 2>&1 || display-setup
 echo "Installing KDE Plasma – about 320 MB to download, 1.2 GB on disk. This takes a while."
@@ -136,12 +136,13 @@ f=/usr/share/dbus-1/services/org.freedesktop.systemd1.service
 dpkg-divert --local --rename --divert "${'$'}f.disabled" --add "${'$'}f" >/dev/null 2>&1 || true
 # skip manual-page indexing (no manuals are installed, see /etc/dpkg/dpkg.cfg.d/droidsystem)
 echo "man-db man-db/auto-update boolean false" | debconf-set-selections
+${DebianSystem.APT_INSTALL_FN}
 # -q: no constantly redrawn progress bar (each redraw is a new line for Konsole to draw)
 apt-get -q update
 # Ubuntu 26.04+ ships Plasma's X11 session (startplasma-x11) as its own package; Debian keeps it in plasma-workspace.
 # DroidSystem needs X11 (Wayland can't run under proot).
 X11_SESSION=${'$'}(apt-cache show plasma-session-x11 >/dev/null 2>&1 && echo plasma-session-x11)
-apt-get -q install -y --no-install-recommends -o Dpkg::Progress-Fancy=0 ${PACKAGES.joinToString(" ")} ${'$'}X11_SESSION || { dpkg --configure -a; apt-get -q install -y -f --no-install-recommends; }
+apt_install ${PACKAGES.joinToString(" ")} ${'$'}X11_SESSION
 # build KDE's application database now, so the first start doesn't have to
 echo "Preparing KDE's app database…"
 XDG_DATA_DIRS=/usr/local/share:/usr/share:/root/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share XDG_CONFIG_DIRS=/$DEFAULTS_DIR:/etc/xdg kbuildsycoca6 --noincremental >/dev/null 2>&1 || true
