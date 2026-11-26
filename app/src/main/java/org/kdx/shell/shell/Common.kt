@@ -189,6 +189,10 @@ fun LaunchableMenu(state: KdxState, l: Launchable, expanded: Boolean, onDismiss:
             text = { Text(if (state.isFavorite(l.key)) "Remove from Favorites" else "Add to Favorites") },
             onClick = { state.toggleFavorite(l.key); onDismiss() },
         )
+        DropdownMenuItem(
+            text = { Text(if (state.isPinned(l.key)) "Unpin from taskbar" else "Pin to taskbar") },
+            onClick = { state.togglePinned(l.key); onDismiss() },
+        )
         if (l is Launchable.Droid) {
             DropdownMenuItem(text = { Text("App info") }, onClick = { state.appInfo(l.app.pkg); onDismiss() })
             DropdownMenuItem(text = { Text("Uninstall") }, onClick = { state.uninstall(l.app.pkg); onDismiss() })

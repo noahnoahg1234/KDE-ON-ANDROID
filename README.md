@@ -163,6 +163,19 @@ X apps only understand a mouse, so touches are translated (`TouchTranslator`):
   Ctrl/Alt/Super shortcuts work, and AltGr characters (@, €…) come out right. The on-screen keyboard stays down
   while a hardware keyboard is connected.
 
+## Desktop resolution and PC desktop
+
+System Settings → **Desktop**:
+- **Resolution**: Phone (default), 1280 × 720, 1600 × 900, 1920 × 1080 or 2560 × 1440 – the number of logical pixels
+  across the screen's long side. Higher draws KDX smaller with more room, like a computer monitor (never below a
+  readable size). The setting shows what each choice gives on your screen.
+- **PC desktop**: desktop icons in columns from the top-left corner, widgets on the right, apps pinned to the taskbar
+  (long-press any app → *Pin to taskbar*), a *Show desktop* button at the end of the taskbar, and KDX windows floating
+  by default. Turning it on also picks 1600 × 900 if the resolution was still Phone.
+- **Open Android apps in windows**: Android apps open in floating, resizable windows using Android's own freeform
+  mode. Phones ship with it switched off: turn on Developer options → *Enable freeform windows* (and *Force
+  activities to be resizable*) once and restart the phone; until then Android apps open full screen as usual.
+
 ## Storage packing
 System Settings → **Storage packing** frees space in DroidSystem. Android has no compressed file systems for apps,
 so it works in two ways:

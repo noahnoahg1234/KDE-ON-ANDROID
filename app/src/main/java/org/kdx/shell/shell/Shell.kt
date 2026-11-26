@@ -43,6 +43,18 @@ import kotlin.math.abs
 /** The whole Plasma-like workspace: wallpaper, desktop, windows, panel and popups. */
 @Composable
 fun Shell(state: KdxState) {
+    // Desktop resolution (System Settings → Desktop): draw KDX at a lower density so more fits, like a PC monitor
+    val sys = androidx.compose.ui.platform.LocalDensity.current
+    androidx.compose.ui.platform.LocalConfiguration.current // re-read the screen size after rotation / resizing
+    val dm = androidx.compose.ui.platform.LocalContext.current.resources.displayMetrics
+    val d = org.kdx.shell.core.DesktopResolution.density(state.desktopResolution, dm.widthPixels, dm.heightPixels, sys.density)
+    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(d, sys.fontScale)) {
+        ShellContent(state)
+    }
+}
+
+@Composable
+private fun ShellContent(state: KdxState) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val compact = maxWidth < 600.dp
         WallpaperLayer(state)
@@ -218,7 +230,8 @@ private fun DesktopLayer(state: KdxState, compact: Boolean) {
                 onLongClick = { menu = true },
             )
     ) {
-        Column(Modifier.fillMaxSize().padding(12.dp)) {
+        if (state.pcDesktop) PcDesktop(state)
+        else Column(Modifier.fillMaxSize().padding(12.dp)) {
             Widgets(state, compact)
             if (state.showDesktopIcons) {
                 val favs = state.favorites.mapNotNull { state.resolve(it) }
@@ -240,6 +253,29 @@ private fun DesktopLayer(state: KdxState, compact: Boolean) {
             DropdownMenuItem(text = { Text("Show Overview") }, onClick = { menu = false; state.overviewOpen = true })
             DropdownMenuItem(text = { Text("Refresh Applications") }, onClick = { menu = false; state.reloadApps() })
         }
+    }
+}
+
+/**
+ * PC desktop: icons in columns from the top-left corner (like a computer's desktop), widgets on the right.
+ */
+@Composable
+private fun PcDesktop(state: KdxState) {
+    BoxWithConstraints(Modifier.fillMaxSize().padding(8.dp)) {
+        val widgets = state.showClockWidget || state.showNotesWidget || state.showSystemWidget
+        val wideEnough = maxWidth > 520.dp
+        if (state.showDesktopIcons) {
+            val favs = state.favorites.mapNotNull { state.resolve(it) }
+            androidx.compose.foundation.lazy.grid.LazyHorizontalGrid(
+                GridCells.Adaptive(96.dp),
+                Modifier.fillMaxHeight().padding(end = if (widgets && wideEnough) 250.dp else 0.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                items(favs, key = { it.key }) { AppTile(state, it, iconSize = 40.dp, textColor = Color.White, shadow = true) }
+            }
+        }
+        if (widgets && wideEnough) Column(Modifier.align(Alignment.TopEnd).width(240.dp)) { Widgets(state, compact = true) }
     }
 }
 

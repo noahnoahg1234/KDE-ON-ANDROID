@@ -279,6 +279,24 @@ class ShellScreenshotTest {
         }
     }
 
+    @Test fun pcDesktop() {
+        rule.runOnUiThread { state.changePcDesktop(true); state.desktopResolution = org.kdx.shell.core.DesktopResolution.FULL_HD }
+        shot("77-pc-desktop")
+        rule.onNodeWithContentDescription("Show desktop").assertExists()
+        rule.runOnUiThread { state.open(KApp.KATE) }
+        shot("78-pc-desktop-window")
+        rule.onNodeWithContentDescription("Show desktop").performClick()
+        rule.mainClock.advanceTimeBy(300)
+        assertTrue("all minimised", state.windows.all { it.minimized })
+        rule.onNodeWithContentDescription("Show desktop").performClick()
+        rule.mainClock.advanceTimeBy(300)
+        assertTrue("back again", state.windows.none { it.minimized })
+        rule.runOnUiThread { state.windows.toList().forEach { state.close(it) }; state.open(KApp.SETTINGS) }
+        shot("79-desktop-settings")
+        rule.onNodeWithText("1920 × 1080").assertExists()
+        rule.runOnUiThread { state.changePcDesktop(false); state.desktopResolution = org.kdx.shell.core.DesktopResolution.PHONE }
+    }
+
     @Test fun flickerBanner() {
         rule.runOnUiThread { state.reportFlicker("Recent events:\n12:00:01.100 KDX lost focus (another window is on top)") }
         shot("76-flicker")

@@ -121,6 +121,29 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     var use24h by mutableStateOf(prefs.getBoolean("h24", true))
     var panelOnTop by mutableStateOf(prefs.getBoolean("panelTop", false))
     var showSeconds by mutableStateOf(prefs.getBoolean("seconds", false))
+    /** KDX desktop resolution (System Settings → Desktop): how much fits on the screen. */
+    var desktopResolution by mutableStateOf(DesktopResolution.entries.getOrElse(prefs.getInt("deskRes", 0)) { DesktopResolution.PHONE })
+    /** PC desktop: icons in columns like a computer, pinned apps on the taskbar, apps in floating windows. */
+    var pcDesktop by mutableStateOf(prefs.getBoolean("pcDesktop", false))
+    /** Open Android apps in floating windows (needs Android's freeform windows, see AndroidWindows). */
+    var androidAppWindows by mutableStateOf(prefs.getBoolean("androidWindows", false))
+    /** Apps pinned to the taskbar (PC desktop), as launchable keys. */
+    val pinned = mutableStateListOf<String>().apply {
+        addAll((prefs.getString("pinned", null) ?: "kdx:DOLPHIN|kdx:KONSOLE|kdx:SETTINGS").split('|').filter { it.isNotBlank() })
+    }
+    fun isPinned(key: String) = key in pinned
+    fun togglePinned(key: String) { if (!pinned.remove(key)) pinned.add(key); save() }
+
+    /** Turns the PC desktop on or off; floating KDX windows come with it (as on a computer). */
+    fun changePcDesktop(on: Boolean) {
+        pcDesktop = on
+        floatingByDefault = on
+        if (on && desktopResolution == DesktopResolution.PHONE) desktopResolution = DesktopResolution.HD_PLUS
+        save()
+    }
+
+    /** Android apps opened in windows so far (for cascading new windows). */
+    private var androidWindowCount = 0
     var notes by mutableStateOf(prefs.getString("notes", "Welcome to KDX!\n• Tap the K button for Kickoff\n• Search with KRunner\n• Long-press apps to add favourites")!!)
     val favorites = mutableStateListOf<String>().apply {
         addAll(
@@ -839,6 +862,10 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         .putBoolean("h24", use24h)
         .putBoolean("panelTop", panelOnTop)
         .putBoolean("seconds", showSeconds)
+        .putInt("deskRes", desktopResolution.ordinal)
+        .putBoolean("pcDesktop", pcDesktop)
+        .putBoolean("androidWindows", androidAppWindows)
+        .putString("pinned", pinned.joinToString("|"))
         .putString("notes", notes)
         .putString("favs", favorites.joinToString("|"))
         .apply()
@@ -1033,13 +1060,17 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     // ---- launching ----
     fun launch(a: AndroidApp) {
         closeMenus()
-        runCatching {
-            ctx.startActivity(
-                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-                    .setComponent(ComponentName(a.pkg, a.cls))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-            )
-        }.onFailure { toast("Could not start ${a.label}") }
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            .setComponent(ComponentName(a.pkg, a.cls))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        // in a floating window, where Android allows it (otherwise full screen as usual)
+        val opts = if (androidAppWindows && AndroidWindows.supported(ctx)) {
+            val dm = ctx.resources.displayMetrics
+            AndroidWindows.options(AndroidWindows.bounds(androidWindowCount++, dm.widthPixels, dm.heightPixels))
+        } else null
+        runCatching { ctx.startActivity(intent, opts) }
+            .recoverCatching { if (opts != null) ctx.startActivity(intent) else throw it }
+            .onFailure { toast("Could not start ${a.label}") }
     }
 
     fun launchKey(key: String) {

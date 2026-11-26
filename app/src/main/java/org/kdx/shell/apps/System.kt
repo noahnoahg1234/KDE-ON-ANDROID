@@ -260,6 +260,7 @@ fun SystemSettings(state: KdxState, w: KWindow) {
     fun set(block: () -> Unit) { block(); state.save() }
 
     Column(Modifier.fillMaxSize().background(c.window).verticalScroll(scroll)) {
+        DesktopSection(state)
         RealKdeSection(state)
         LinuxSystemSection(state)
         if (state.debian != null) StoragePackingSection(state)
@@ -352,10 +353,6 @@ private fun Toggle(label: String, value: Boolean, onChange: (Boolean) -> Unit) {
     }
 }
 
-/**
- * System Settings → Real KDE Plasma: one switch that sets up everything (Linux system, Debian, Plasma) and then runs
- * the real KDE Plasma desktop full screen, at the phone's own resolution if wanted.
- */
 /** The event log behind the safe-mode / flicker notices, for when the screen misbehaves. */
 @Composable
 private fun TroubleshootingSection(state: KdxState) {
@@ -374,6 +371,50 @@ private fun TroubleshootingSection(state: KdxState) {
     }
 }
 
+/**
+ * System Settings → Desktop: KDX's resolution (how much fits on the screen) and the PC desktop – icons like a computer,
+ * pinned apps on the taskbar, floating windows, Android apps in windows.
+ */
+@Composable
+private fun DesktopSection(state: KdxState) {
+    val c = LocalBreeze.current
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val dm = ctx.resources.displayMetrics
+    Section("Desktop", Icons.Filled.DesktopWindows) {
+        Text("Resolution", color = c.text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        Text("Higher = everything smaller and more room, like a computer monitor. Text never gets smaller than readable.",
+            color = c.inactiveText, fontSize = 12.sp)
+        org.kdx.shell.core.DesktopResolution.entries.forEach { r ->
+            val (aw, ah) = org.kdx.shell.core.DesktopResolution.actualSize(r, dm.widthPixels, dm.heightPixels, dm.density)
+            Row(Modifier.fillMaxWidth().clickable { state.desktopResolution = r; state.save() }, verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(state.desktopResolution == r, { state.desktopResolution = r; state.save() })
+                Column {
+                    Text(r.label, color = c.text, fontSize = 14.sp)
+                    Text("On this screen: $aw × $ah", color = c.inactiveText, fontSize = 11.sp)
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Toggle("PC desktop (icons in columns, pinned apps on the taskbar, floating windows)", state.pcDesktop) { state.changePcDesktop(it) }
+        Toggle("Open Android apps in windows", state.androidAppWindows) { state.androidAppWindows = it; state.save() }
+        if (state.androidAppWindows) {
+            val supported = remember { org.kdx.shell.core.AndroidWindows.supported(ctx) }
+            if (supported) Text("Android apps open in floating windows you can move and resize.", color = c.inactiveText, fontSize = 12.sp)
+            else {
+                Text("Your phone has floating windows switched off. Turn them on once: Developer options → " +
+                    "\"Enable freeform windows\" (and \"Force activities to be resizable\"), then restart the phone. " +
+                    "No Developer options? Settings → About phone → tap \"Build number\" 7 times. Until then Android " +
+                    "apps open full screen as usual.", color = c.inactiveText, fontSize = 12.sp)
+                OutlinedButton({ org.kdx.shell.core.AndroidWindows.openDeveloperOptions(ctx) }) { Text("Open Developer options") }
+            }
+        }
+    }
+}
+
+/**
+ * System Settings → Real KDE Plasma: one switch that sets up everything (Linux system, Debian, Plasma) and then runs
+ * the real KDE Plasma desktop full screen, at the phone's own resolution if wanted.
+ */
 @Composable
 private fun RealKdeSection(state: KdxState) {
     val c = LocalBreeze.current

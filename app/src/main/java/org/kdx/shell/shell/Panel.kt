@@ -18,6 +18,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,12 +50,52 @@ fun Panel(state: KdxState, compact: Boolean, modifier: Modifier = Modifier) {
             if (!compact) PanelIcon(Icons.Filled.GridView, "Overview", state.overviewOpen) {
                 state.closeMenus(); state.overviewOpen = true
             }
+            if (state.pcDesktop) PinnedApps(state)
             Pager(state, compact)
             TaskManager(state, compact, Modifier.weight(1f))
             SystemTray(state, compact)
+            if (state.pcDesktop) ShowDesktopButton(state)
         }
         if (state.panelOnTop) HorizontalDivider(color = c.border.copy(alpha = 0.6f))
     }
+}
+
+/** PC desktop: apps pinned to the taskbar (long-press an app → Pin to taskbar). */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PinnedApps(state: KdxState) {
+    val apps = state.pinned.mapNotNull { state.resolve(it) }
+    if (apps.isEmpty()) return
+    Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        apps.forEach { l ->
+            var menu by remember { mutableStateOf(false) }
+            Box {
+                Box(
+                    Modifier.size(40.dp).clip(RoundedCornerShape(6.dp))
+                        .combinedClickable(onClick = { state.launch(l) }, onLongClick = { menu = true }),
+                    contentAlignment = Alignment.Center,
+                ) { LaunchableIcon(l, 28.dp) }
+                LaunchableMenu(state, l, menu) { menu = false }
+            }
+        }
+    }
+    Box(Modifier.width(1.dp).height(28.dp).background(LocalBreeze.current.border))
+}
+
+/** PC desktop: the thin button at the far end of the taskbar – minimise everything / bring it back. */
+@Composable
+private fun ShowDesktopButton(state: KdxState) {
+    val c = LocalBreeze.current
+    var hidden by remember { mutableStateOf<List<Int>>(emptyList()) }
+    Box(
+        Modifier.padding(start = 4.dp).width(10.dp).height(40.dp).border(1.dp, c.border, RoundedCornerShape(2.dp))
+            .clickable {
+                val open = state.windowsOnDesktop().filter { !it.minimized }
+                if (open.isNotEmpty()) { hidden = open.map { it.id }; open.forEach { state.minimize(it) } }
+                else { state.windows.filter { it.id in hidden }.forEach { state.focus(it) }; hidden = emptyList() }
+            }
+            .semantics { contentDescription = "Show desktop" }
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)
