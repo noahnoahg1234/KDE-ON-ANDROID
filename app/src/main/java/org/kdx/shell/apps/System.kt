@@ -412,6 +412,12 @@ private fun DesktopSection(state: KdxState) {
             // read again every time (the user may just have come back from Developer options)
             val supported = org.kdx.shell.core.AndroidWindows.supported(ctx)
             val canAsk = org.kdx.shell.core.AndroidWindows.canRequestWindows
+            val usage = org.kdx.shell.core.AndroidWindows.hasUsageAccess(ctx)
+            Text(if (usage) "Open Android app windows show on KDX's taskbar. Long-press one there → Maximize fills the desktop " +
+                    "and keeps the taskbar visible (the maximize button Android puts on the window makes the app full screen)."
+                else "Android app windows you open from KDX show on its taskbar. To also see apps opened another way – and have " +
+                    "them leave the taskbar when closed – allow KDX \"Usage access\".", color = c.inactiveText, fontSize = 12.sp)
+            if (!usage) OutlinedButton({ org.kdx.shell.core.AndroidWindows.openUsageAccess(ctx) }) { Text("Allow Usage access") }
             if (!canAsk) Text("Android blocks KDX from asking for floating windows on this phone, so Android apps open full screen.",
                 color = c.negative, fontSize = 12.sp)
             else if (supported) Text("Android apps open in floating windows you can move and resize. An app that's already " +

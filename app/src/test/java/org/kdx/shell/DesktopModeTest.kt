@@ -49,3 +49,30 @@ class DesktopWidgetsTest {
         assertNull("the old note stays linked to the Notes app", w[1].text)
     }
 }
+
+@org.junit.runner.RunWith(org.robolectric.RobolectricTestRunner::class)
+@org.robolectric.annotation.Config(sdk = [34])
+class AndroidWindowsTaskbarTest {
+    @Test fun openAppsFollowUsageEvents() {
+        val t = org.kdx.shell.core.OpenAppTracker()
+        val apps = setOf("com.a", "com.b")
+        t.apply(listOf("com.a" to 1, "com.b" to 1, "org.kdx.shell" to 1, "com.android.systemui" to 1)) { it in apps }
+        assertEquals(listOf("com.a", "com.b"), t.packages)
+        t.apply(listOf("com.a" to 2, "com.a" to 23)) { it in apps } // paused / stopped: window still open
+        assertEquals(listOf("com.a", "com.b"), t.packages)
+        t.apply(listOf("com.b" to 24)) { it in apps }                 // destroyed: window closed
+        assertEquals(listOf("com.a"), t.packages)
+        t.apply(listOf("com.b" to 1)) { it in apps }                  // opened again
+        assertEquals(listOf("com.a", "com.b"), t.packages)
+    }
+
+    @Test fun maximizeLeavesTheTaskbarVisible() {
+        val d = 2.625f; val status = 63; val nav = 63
+        val bottom = org.kdx.shell.core.DesktopMargins.of(org.kdx.shell.core.PanelPosition.BOTTOM, d, status, nav).bounds(1080, 2400)
+        assertEquals(android.graphics.Rect(0, 63, 1080, 2400 - 63 - 126), bottom)
+        val dock = org.kdx.shell.core.DesktopMargins.of(org.kdx.shell.core.PanelPosition.LEFT_DOCK, d, status, nav).bounds(2400, 1080)
+        assertEquals(android.graphics.Rect(157, 63 + 89, 2400, 1080 - 63), dock)
+        val right = org.kdx.shell.core.DesktopMargins.of(org.kdx.shell.core.PanelPosition.RIGHT_DOCK, d, status, nav).bounds(2400, 1080)
+        assertEquals(2400 - 157, right.right)
+    }
+}

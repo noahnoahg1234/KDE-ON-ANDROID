@@ -176,6 +176,8 @@ private fun TaskManager(state: KdxState, compact: Boolean, modifier: Modifier) {
     val tasks = state.windowsOnDesktop().sortedBy { it.id }
     LazyRow(modifier.padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         items(tasks, key = { it.id }) { w -> TaskButton(state, w, compact) }
+        // Android apps in floating windows
+        items(state.androidWindows.toList(), key = { "android:" + it.pkg }) { a -> AndroidTaskButton(state, a, compact) }
     }
 }
 
@@ -213,6 +215,47 @@ private fun TaskButton(state: KdxState, w: KWindow, compact: Boolean) {
             )
         }
         WindowMenu(state, w, menu) { menu = false }
+    }
+}
+
+/** An Android app's floating window on the taskbar: tap = bring it to the front; long-press = Maximize, Restore… */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun AndroidTaskButton(state: KdxState, a: org.kdx.shell.core.AndroidApp, compact: Boolean) {
+    val c = LocalBreeze.current
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        Column(
+            Modifier.height(44.dp).then(if (compact) Modifier.width(44.dp) else Modifier.widthIn(max = 190.dp))
+                .clip(RoundedCornerShape(4.dp))
+                .combinedClickable(onClick = { state.focusAndroidWindow(a) }, onLongClick = { menu = true })
+                .semantics { contentDescription = a.label },
+        ) {
+            Row(
+                Modifier.weight(1f).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = if (compact) Arrangement.Center else Arrangement.Start,
+            ) {
+                a.icon?.let { androidx.compose.foundation.Image(it, null, Modifier.size(26.dp)) } ?: Icon(Icons.Filled.Android, null, tint = c.panelText, modifier = Modifier.size(26.dp))
+                if (!compact) {
+                    Spacer(Modifier.width(6.dp))
+                    Text(a.label, color = c.panelText, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            Box(Modifier.fillMaxWidth().height(3.dp).padding(horizontal = 10.dp).background(c.inactiveText.copy(alpha = 0.6f)))
+        }
+        AndroidWindowMenu(state, a, menu) { menu = false }
+    }
+}
+
+/** Menu for an Android app's window (taskbar and dock). */
+@Composable
+internal fun AndroidWindowMenu(state: KdxState, a: org.kdx.shell.core.AndroidApp, expanded: Boolean, onDismiss: () -> Unit) {
+    DropdownMenu(expanded, onDismiss) {
+        DropdownMenuItem(text = { Text("Show") }, onClick = { onDismiss(); state.focusAndroidWindow(a) })
+        DropdownMenuItem(text = { Text("Maximize") }, onClick = { onDismiss(); state.maximizeAndroidWindow(a) })
+        DropdownMenuItem(text = { Text("Restore size") }, onClick = { onDismiss(); state.restoreAndroidWindow(a) })
+        DropdownMenuItem(text = { Text("App info") }, onClick = { onDismiss(); state.appInfo(a.pkg) })
+        DropdownMenuItem(text = { Text("Remove from taskbar") }, onClick = { onDismiss(); state.removeAndroidWindow(a) })
     }
 }
 

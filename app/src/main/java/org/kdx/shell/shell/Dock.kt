@@ -65,6 +65,7 @@ fun Dock(state: KdxState, modifier: Modifier = Modifier) {
     ) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
             dockItems(state).forEach { item -> DockButton(state, item, left) }
+            state.androidWindows.toList().forEach { a -> AndroidDockButton(state, a, left) }
         }
         Box(
             Modifier.size(48.dp).clip(RoundedCornerShape(10.dp))
@@ -123,6 +124,25 @@ private fun DockButton(state: KdxState, item: DockItem, left: Boolean) {
                 onClick = { menu = false; item.windows.forEach { state.close(it) } },
             )
         }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun AndroidDockButton(state: KdxState, a: org.kdx.shell.core.AndroidApp, left: Boolean) {
+    var menu by remember { mutableStateOf(false) }
+    Box(Modifier.padding(vertical = 3.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (left) RunningDots(1)
+            Box(
+                Modifier.size(48.dp).clip(RoundedCornerShape(10.dp))
+                    .combinedClickable(onClick = { state.focusAndroidWindow(a) }, onLongClick = { menu = true })
+                    .semantics { contentDescription = a.label },
+                contentAlignment = Alignment.Center,
+            ) { a.icon?.let { androidx.compose.foundation.Image(it, null, Modifier.size(34.dp)) } }
+            if (!left) RunningDots(1)
+        }
+        AndroidWindowMenu(state, a, menu) { menu = false }
     }
 }
 

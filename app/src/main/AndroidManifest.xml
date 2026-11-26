@@ -10,6 +10,8 @@
     <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
     <!-- Bazaar loads the Flathub app catalog -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- which Android apps have open windows, for KDX's taskbar (the user allows it in Settings → Usage access) -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <!-- keep Linux apps running at full speed while they're open (see LinuxAppsService) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />

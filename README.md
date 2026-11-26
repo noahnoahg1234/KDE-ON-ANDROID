@@ -196,6 +196,11 @@ System Settings → **Desktop**:
 - **Open Android apps in windows**: Android apps open in floating, resizable windows using Android's own freeform
   mode. Phones ship with it switched off: turn on Developer options → *Enable freeform windows* (and *Force
   activities to be resizable*) once and restart the phone; until then Android apps open full screen as usual.
+- **Android app windows on the taskbar** (and in the side dock): tap to bring one to the front; long-press for
+  **Maximize** (fills the desktop and keeps KDX's taskbar visible – the maximize button Android draws on the window
+  makes the app full screen over everything), *Restore size*, *App info* and *Remove from taskbar*. Apps opened from
+  KDX appear by themselves; with **Usage access** allowed (System Settings → Desktop), KDX also sees apps opened
+  another way and takes closed ones off the taskbar.
 
 ## Storage packing
 System Settings → **Storage packing** frees space in DroidSystem. Android has no compressed file systems for apps,

@@ -91,6 +91,32 @@ object AndroidWindows {
         return o.toBundle()
     }
 
+    /** True if the user allowed KDX "Usage access" (to see which apps are open, for the taskbar). */
+    fun hasUsageAccess(ctx: Context): Boolean = runCatching {
+        val ops = ctx.getSystemService(android.app.AppOpsManager::class.java)
+        @Suppress("DEPRECATION")
+        ops.checkOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), ctx.packageName) ==
+            android.app.AppOpsManager.MODE_ALLOWED
+    }.getOrDefault(false)
+
+    fun openUsageAccess(ctx: Context) {
+        runCatching { ctx.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    }
+
+    /** Android usage events since [since] (ms), as (package, type), oldest first. */
+    fun usageEvents(ctx: Context, since: Long, until: Long): List<Pair<String, Int>> = runCatching {
+        val usm = ctx.getSystemService(android.app.usage.UsageStatsManager::class.java)
+        val ev = usm.queryEvents(since, until)
+        val e = android.app.usage.UsageEvents.Event()
+        buildList { while (ev.hasNextEvent()) { ev.getNextEvent(e); add(e.packageName to e.eventType) } }
+    }.getOrDefault(emptyList())
+
+    /** The screen area minus Android's own bars, from the system's dimensions (0 if unknown). */
+    fun systemBarPx(ctx: Context, name: String): Int {
+        val id = ctx.resources.getIdentifier(name, "dimen", "android")
+        return if (id > 0) ctx.resources.getDimensionPixelSize(id) else 0
+    }
+
     /** Opens Developer options, where "Enable freeform windows" is. */
     fun openDeveloperOptions(ctx: Context) {
         runCatching { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
@@ -110,4 +136,55 @@ enum class PanelPosition(val label: String) {
     RIGHT_DOCK("Side dock, right");
 
     val isDock get() = this == LEFT_DOCK || this == RIGHT_DOCK
+}
+
+/**
+ * Which Android apps have open windows, from Android's usage events (needs "Usage access" – Android doesn't otherwise
+ * tell an app which other apps are open). Kept free of Android classes so it can be tested.
+ */
+class OpenAppTracker {
+    /** Android's UsageEvents.Event types used here. */
+    companion object {
+        const val RESUMED = 1          // ACTIVITY_RESUMED (MOVE_TO_FOREGROUND)
+        const val DESTROYED = 24       // ACTIVITY_DESTROYED (Android 10+)
+    }
+
+    private val open = LinkedHashSet<String>()
+    /** Packages with an activity that was last seen resumed (until it's destroyed), oldest first. */
+    val packages: List<String> get() = open.toList()
+
+    /**
+     * Applies events (package, type) in time order. [relevant] filters packages (apps with a launcher entry, not KDX).
+     * An app is open from its first resumed activity until its activities are destroyed (its window closed).
+     */
+    fun apply(events: List<Pair<String, Int>>, relevant: (String) -> Boolean) {
+        for ((pkg, type) in events) {
+            if (!relevant(pkg)) continue
+            when (type) {
+                RESUMED -> open += pkg
+                DESTROYED -> open -= pkg
+            }
+        }
+    }
+
+    fun add(pkg: String) { open += pkg }
+    fun remove(pkg: String) { open -= pkg }
+}
+
+/** Margins (px) KDX's own bars take: where a maximised Android window must not go, so the taskbar stays visible. */
+data class DesktopMargins(val left: Int, val top: Int, val right: Int, val bottom: Int) {
+    fun bounds(screenW: Int, screenH: Int) = Rect(left, top, (screenW - right).coerceAtLeast(left + 1), (screenH - bottom).coerceAtLeast(top + 1))
+
+    companion object {
+        /** KDX's bars for [panel]: the panel (48 dp) or the dock (60 dp) with its top bar (34 dp), plus Android's bars. */
+        fun of(panel: PanelPosition, density: Float, statusBarPx: Int, navBarPx: Int): DesktopMargins {
+            fun dp(v: Int) = (v * density).toInt()
+            return when (panel) {
+                PanelPosition.BOTTOM -> DesktopMargins(0, statusBarPx, 0, navBarPx + dp(48))
+                PanelPosition.TOP -> DesktopMargins(0, statusBarPx + dp(48), 0, navBarPx)
+                PanelPosition.LEFT_DOCK -> DesktopMargins(dp(60), statusBarPx + dp(34), 0, navBarPx)
+                PanelPosition.RIGHT_DOCK -> DesktopMargins(0, statusBarPx + dp(34), dp(60), navBarPx)
+            }
+        }
+    }
 }

@@ -283,6 +283,19 @@ class ShellScreenshotTest {
         }
     }
 
+    @Test fun androidWindowsOnTaskbar() {
+        val app = org.kdx.shell.core.AndroidApp("Chrome", "com.android.chrome", "Main", null)
+        rule.runOnUiThread { state.androidAppWindows = true; state.androidWindows.add(app); state.open(KApp.KATE) }
+        shot("85-android-on-taskbar")
+        rule.onNodeWithContentDescription("Chrome").performTouchInput { longClick() }
+        rule.mainClock.advanceTimeBy(800)
+        rule.onNodeWithText("Maximize").assertExists()
+        rule.onNodeWithText("Remove from taskbar").performClick()
+        rule.mainClock.advanceTimeBy(300)
+        assertTrue(state.androidWindows.isEmpty())
+        rule.runOnUiThread { state.androidAppWindows = false }
+    }
+
     @Test fun sideDock() {
         rule.runOnUiThread { state.panelPosition = org.kdx.shell.core.PanelPosition.LEFT_DOCK; state.changePcDesktop(true); state.open(KApp.KATE); state.open(KApp.KCALC) }
         shot("82-side-dock")

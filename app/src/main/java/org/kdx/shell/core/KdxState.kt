@@ -984,6 +984,8 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     init {
         checkStartLoop()
         reloadApps()
+        // Android app windows on the taskbar (with Usage access): check every few seconds
+        viewModelScope.launch(guard) { while (true) { delay(2500); runCatching { checkOpenAndroidApps() } } }
         // safe mode: not even the Linux system (it comes back with "Resume")
         if (!safeMode) reloadDroid()
         // real KDE Plasma as the desktop: start it (or continue setting it up) when KDX opens
@@ -1125,7 +1127,69 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         } else null
         runCatching { ctx.startActivity(intent, opts) }
             .recoverCatching { if (opts != null) ctx.startActivity(intent) else throw it }
+            .onSuccess { if (opts != null) trackAndroidWindow(a) }
             .onFailure { toast("Could not start ${a.label}") }
+    }
+
+    // ---- Android apps in windows, on KDX's taskbar ----
+    /** Android apps with open windows (in floating-window mode), shown on the taskbar after KDX's own windows. */
+    val androidWindows = mutableStateListOf<AndroidApp>()
+    private val openApps = OpenAppTracker()
+    private var usageCheckedAt = System.currentTimeMillis()
+
+    private fun trackAndroidWindow(a: AndroidApp) {
+        openApps.add(a.pkg)
+        if (androidWindows.none { it.pkg == a.pkg }) androidWindows.add(a)
+    }
+
+    /** Brings an Android app's window to the front (Android keeps its size and place). */
+    fun focusAndroidWindow(a: AndroidApp) {
+        runCatching {
+            ctx.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(ComponentName(a.pkg, a.cls))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED))
+        }.onFailure { toast("Could not open ${a.label}") }
+    }
+
+    /**
+     * Maximises an Android app's window to the desktop – the screen minus KDX's taskbar (or dock) – so the taskbar
+     * stays visible. (The maximise button Android draws on the window makes the app full screen over everything.)
+     */
+    fun maximizeAndroidWindow(a: AndroidApp) = relaunchAndroidWindow(a) { w, h -> desktopMargins().bounds(w, h) }
+
+    /** Back to a normal-sized window. */
+    fun restoreAndroidWindow(a: AndroidApp) = relaunchAndroidWindow(a) { w, h -> AndroidWindows.bounds(androidWindowCount++, w, h) }
+
+    private fun relaunchAndroidWindow(a: AndroidApp, bounds: (Int, Int) -> android.graphics.Rect) {
+        if (!AndroidWindows.supported(ctx)) { toast("Floating windows are off – see System Settings → Desktop"); return }
+        val dm = ctx.resources.displayMetrics
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(ComponentName(a.pkg, a.cls))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        runCatching { ctx.startActivity(intent, AndroidWindows.options(bounds(dm.widthPixels, dm.heightPixels))) }
+            .onSuccess { trackAndroidWindow(a) }
+            .onFailure { toast("Could not resize ${a.label}") }
+    }
+
+    /** Where KDX's own bars are (a maximised Android window leaves them visible). */
+    fun desktopMargins(): DesktopMargins {
+        val dm = ctx.resources.displayMetrics
+        val scale = DesktopResolution.density(desktopResolution, dm.widthPixels, dm.heightPixels, dm.density)
+        return DesktopMargins.of(panelPosition, scale, AndroidWindows.systemBarPx(ctx, "status_bar_height"), AndroidWindows.systemBarPx(ctx, "navigation_bar_height"))
+    }
+
+    /** Takes an Android app off the taskbar (its window stays open; close it with its own ✕). */
+    fun removeAndroidWindow(a: AndroidApp) { openApps.remove(a.pkg); androidWindows.removeAll { it.pkg == a.pkg } }
+
+    /** With Usage access: follow which Android apps open and close their windows (Android tells KDX nothing otherwise). */
+    private fun checkOpenAndroidApps() {
+        if (!androidAppWindows || !AndroidWindows.hasUsageAccess(ctx)) return
+        val now = System.currentTimeMillis()
+        val events = AndroidWindows.usageEvents(ctx, usageCheckedAt - 1000, now)
+        usageCheckedAt = now
+        val known = androidApps.associateBy { it.pkg }
+        openApps.apply(events) { it != ctx.packageName && it in known }
+        val pkgs = openApps.packages
+        androidWindows.removeAll { it.pkg !in pkgs }
+        pkgs.forEach { p -> if (androidWindows.none { it.pkg == p }) known[p]?.let { androidWindows.add(it) } }
     }
 
     fun launchKey(key: String) {
