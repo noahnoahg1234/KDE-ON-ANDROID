@@ -112,6 +112,8 @@ dependencies {
     // zstd: Ubuntu's packages are compressed with it (Android version with its native libraries; the desktop jar for tests)
     implementation("com.github.luben:zstd-jni:1.5.7-4@aar")
     testImplementation("com.github.luben:zstd-jni:1.5.7-4")
+    // Android apps in floating windows: Android's call for that (setLaunchWindowingMode) is hidden from apps
+    implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")
     // Tor (The Tor Project / Guardian Project build) for the Privacy VPN. Pure Java; its newer Kotlin stdlib isn't needed.
     // 0.4.9.8 is the newest release whose classes (Java 21) AGP 8.7's D8 can read; later ones are Java 24 bytecode.
     implementation("info.guardianproject:tor-android:0.4.9.8") { exclude(group = "org.jetbrains.kotlin") }

@@ -68,14 +68,26 @@ object AndroidWindows {
         return Rect(left, top, left + ww, top + wh)
     }
 
+    /**
+     * Android's call that asks for a floating window (ActivityOptions.setLaunchWindowingMode) is hidden from apps
+     * (Android 9+ blocks it), so without this KDX's request quietly fell back to a full-screen app. KDX lifts the block
+     * for ActivityOptions only (with LSPosed's HiddenApiBypass).
+     */
+    private val setWindowingMode: java.lang.reflect.Method? by lazy {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) runCatching {
+            org.lsposed.hiddenapibypass.HiddenApiBypass.addHiddenApiExemptions("Landroid/app/ActivityOptions;")
+        }
+        runCatching { ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType) }.getOrNull()
+    }
+
+    /** True if KDX can ask Android for a floating window (the hidden call is reachable). */
+    val canRequestWindows get() = Build.VERSION.SDK_INT < Build.VERSION_CODES.P || setWindowingMode != null
+
     /** Options that open an activity in a floating window at [bounds]. */
     fun options(bounds: Rect): android.os.Bundle? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return null
         val o = ActivityOptions.makeBasic().setLaunchBounds(bounds)
-        // the windowing mode isn't public API: without it, Android opens a window only where freeform is the default
-        runCatching {
-            ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType).invoke(o, WINDOWING_MODE_FREEFORM)
-        }
+        runCatching { setWindowingMode?.invoke(o, WINDOWING_MODE_FREEFORM) }
         return o.toBundle()
     }
 

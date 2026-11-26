@@ -409,8 +409,14 @@ private fun DesktopSection(state: KdxState) {
         Toggle("PC desktop (icons in columns, pinned apps on the taskbar, floating windows)", state.pcDesktop) { state.changePcDesktop(it) }
         Toggle("Open Android apps in windows", state.androidAppWindows) { state.androidAppWindows = it; state.save() }
         if (state.androidAppWindows) {
-            val supported = remember { org.kdx.shell.core.AndroidWindows.supported(ctx) }
-            if (supported) Text("Android apps open in floating windows you can move and resize.", color = c.inactiveText, fontSize = 12.sp)
+            // read again every time (the user may just have come back from Developer options)
+            val supported = org.kdx.shell.core.AndroidWindows.supported(ctx)
+            val canAsk = org.kdx.shell.core.AndroidWindows.canRequestWindows
+            if (!canAsk) Text("Android blocks KDX from asking for floating windows on this phone, so Android apps open full screen.",
+                color = c.negative, fontSize = 12.sp)
+            else if (supported) Text("Android apps open in floating windows you can move and resize. An app that's already " +
+                "open full screen opens that way again – close it in Recents first. If apps still open full screen, " +
+                "restart the phone once (Android only reads the freeform setting when it starts).", color = c.inactiveText, fontSize = 12.sp)
             else {
                 Text("Your phone has floating windows switched off. Turn them on once: Developer options → " +
                     "\"Enable freeform windows\" (and \"Force activities to be resizable\"), then restart the phone. " +
