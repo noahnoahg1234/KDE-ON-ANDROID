@@ -49,8 +49,19 @@ fun Kickoff(state: KdxState, compact: Boolean) {
 
     Box(
         Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()
-            .padding(start = 4.dp, end = 4.dp, top = if (state.panelOnTop) 50.dp else 8.dp, bottom = if (state.panelOnTop) 8.dp else 50.dp),
-        contentAlignment = if (state.panelOnTop) Alignment.TopStart else Alignment.BottomStart,
+            .padding(
+                // next to the dock (side dock layouts), else at the panel
+                start = if (state.panelPosition == org.kdx.shell.core.PanelPosition.LEFT_DOCK) 64.dp else 4.dp,
+                end = if (state.panelPosition == org.kdx.shell.core.PanelPosition.RIGHT_DOCK) 64.dp else 4.dp,
+                top = if (state.panelPosition.isDock) 38.dp else if (state.panelOnTop) 50.dp else 8.dp,
+                bottom = if (state.panelPosition.isDock) 8.dp else if (state.panelOnTop) 8.dp else 50.dp,
+            ),
+        contentAlignment = when {
+            state.panelPosition == org.kdx.shell.core.PanelPosition.LEFT_DOCK -> Alignment.BottomStart
+            state.panelPosition == org.kdx.shell.core.PanelPosition.RIGHT_DOCK -> Alignment.BottomEnd
+            state.panelOnTop -> Alignment.TopStart
+            else -> Alignment.BottomStart
+        },
     ) {
         Surface(
             Modifier

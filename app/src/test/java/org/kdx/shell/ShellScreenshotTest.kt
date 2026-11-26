@@ -282,6 +282,30 @@ class ShellScreenshotTest {
         }
     }
 
+    @Test fun sideDock() {
+        rule.runOnUiThread { state.panelPosition = org.kdx.shell.core.PanelPosition.LEFT_DOCK; state.changePcDesktop(true); state.open(KApp.KATE); state.open(KApp.KCALC) }
+        shot("82-side-dock")
+        rule.onNodeWithText("Activities").assertExists()
+        rule.onNodeWithContentDescription("Show Applications").performClick()
+        rule.mainClock.advanceTimeBy(600)
+        assertTrue(state.kickoffOpen)
+        shot("83-side-dock-apps")
+        rule.runOnUiThread { state.closeMenus() }
+        // a pinned app with an open window: tap = minimise, tap again = back
+        val kate = state.windows.first { it.app == KApp.KATE }
+        rule.runOnUiThread { state.togglePinned("kdx:KATE"); state.focus(kate) }
+        rule.mainClock.advanceTimeBy(300)
+        rule.onNodeWithContentDescription("Kate").performClick()
+        rule.mainClock.advanceTimeBy(300)
+        assertTrue(kate.minimized)
+        rule.onNodeWithContentDescription("Kate").performClick()
+        rule.mainClock.advanceTimeBy(300)
+        assertTrue(!kate.minimized)
+        rule.runOnUiThread { state.panelPosition = org.kdx.shell.core.PanelPosition.RIGHT_DOCK }
+        shot("84-side-dock-right")
+        rule.runOnUiThread { state.panelPosition = org.kdx.shell.core.PanelPosition.BOTTOM; state.changePcDesktop(false); state.togglePinned("kdx:KATE") }
+    }
+
     @Test fun addAndRemoveWidgets() {
         assertEquals("default widgets", listOf("CLOCK", "SYSTEM", "NOTE"), state.desktopWidgets.map { it.type.name })
         rule.runOnUiThread { state.widgetExplorerOpen = true }

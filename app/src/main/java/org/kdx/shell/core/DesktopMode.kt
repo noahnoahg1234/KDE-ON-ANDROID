@@ -85,3 +85,17 @@ object AndroidWindows {
             .onFailure { runCatching { ctx.startActivity(Intent(Settings.ACTION_DEVICE_INFO_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }
     }
 }
+
+/**
+ * Where the taskbar is. The side docks are laid out like Ubuntu's desktop: a dock with the apps along the side
+ * (pinned apps, open windows marked with dots, "Show Applications" at the end) and a thin top bar with the clock and
+ * the status icons.
+ */
+enum class PanelPosition(val label: String) {
+    BOTTOM("Bottom panel"),
+    TOP("Top panel"),
+    LEFT_DOCK("Side dock, left (like Ubuntu)"),
+    RIGHT_DOCK("Side dock, right");
+
+    val isDock get() = this == LEFT_DOCK || this == RIGHT_DOCK
+}

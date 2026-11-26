@@ -313,7 +313,13 @@ fun SystemSettings(state: KdxState, w: KWindow) {
             Text("Virtual desktops: ${state.desktopCount}", color = c.text)
             Slider(state.desktopCount.toFloat(), { state.setDesktops(it.toInt()) }, valueRange = 1f..8f, steps = 6)
             Toggle("Open windows floating instead of maximized", state.floatingByDefault) { set { state.floatingByDefault = it } }
-            Toggle("Panel at top of screen", state.panelOnTop) { set { state.panelOnTop = it } }
+            Text("Taskbar", color = c.text, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
+            org.kdx.shell.core.PanelPosition.entries.forEach { p ->
+                Row(Modifier.fillMaxWidth().clickable { set { state.panelPosition = p } }, verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(state.panelPosition == p, { set { state.panelPosition = p } })
+                    Text(p.label, color = c.text, fontSize = 14.sp)
+                }
+            }
             Toggle("Show favorites as desktop icons", state.showDesktopIcons) { set { state.showDesktopIcons = it } }
         }
         Section("Widgets", Icons.Filled.Widgets) {
@@ -667,14 +673,15 @@ private fun LinuxSystemSection(state: KdxState) {
     )
 }
 
-/** DroidSystem 2: Debian base status and setup actions. */
+/** DroidSystem 2: the Linux base (Ubuntu or Debian) – status and setup actions. */
 @Composable
 private fun DebianBlock(state: KdxState) {
     val c = LocalBreeze.current
     val deb = state.debian
     val prog = state.debianProgress
     Spacer(Modifier.height(6.dp))
-    Text("Debian base", color = c.text, fontWeight = FontWeight.SemiBold)
+    var confirmSwitch by remember { mutableStateOf<org.kdx.shell.droid.Distro?>(null) }
+    Text("Linux base", color = c.text, fontWeight = FontWeight.SemiBold)
     when {
         prog != null -> {
             Text("Building DroidSystem 2: ${prog.second}", color = c.text, fontSize = 13.sp)
@@ -683,7 +690,7 @@ private fun DebianBlock(state: KdxState) {
             Text("Keep KDX open; configuring packages takes a few minutes on a phone.", color = c.inactiveText, fontSize = 12.sp)
         }
         deb != null -> {
-            KV("Status", "Installed (Debian trixie, ${deb.arch})")
+            KV("Status", "Installed (${deb.distro.fullName}, ${deb.arch})")
             KV("Linux apps", if (deb.hasCommand("usr/bin/Xvnc")) "Display server ready" else "Not set up")
             KV("Flatpak", if (deb.hasCommand("usr/bin/flatpak")) "Ready (Flathub)" else "Not set up")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -692,14 +699,40 @@ private fun DebianBlock(state: KdxState) {
                 if (!deb.hasCommand("usr/bin/flatpak")) OutlinedButton({ state.open(org.kdx.shell.core.KApp.KONSOLE, "flatpak-setup") }, Modifier.weight(1f)) { Text("Set up Flatpak") }
                 else OutlinedButton({ state.open(org.kdx.shell.core.KApp.BAZAAR) }, Modifier.weight(1f)) { Text("Get apps") }
             }
-            TextButton({ state.uninstallDebian() }) { Text("Remove Debian base", color = c.negative) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                org.kdx.shell.droid.Distro.entries.filter { it != deb.distro }.forEach { d ->
+                    OutlinedButton({ confirmSwitch = d }) { Text("Switch to ${d.label}") }
+                }
+                TextButton({ state.uninstallDebian() }) { Text("Remove", color = c.negative) }
+            }
         }
         else -> {
             state.debianError?.let { e ->
                 Text("Setup failed: $e", color = c.negative, fontSize = 13.sp, maxLines = 6)
                 state.debianLog.takeLast(4).forEach { Text(it, color = c.inactiveText, fontSize = 11.sp, maxLines = 1) }
-            } ?: Text("Not installed yet.", color = c.inactiveText, fontSize = 13.sp)
-            Button({ state.installDebian() }) { Text(if (state.debianError != null) "Retry" else "Install Debian base") }
+            } ?: Text("Not installed yet. Choose what it's built from:", color = c.inactiveText, fontSize = 13.sp)
+            org.kdx.shell.droid.Distro.entries.forEach { d ->
+                Row(Modifier.fillMaxWidth().clickable { state.chooseLinuxBase(d) }, verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(state.linuxBase == d, { state.chooseLinuxBase(d) })
+                    Column {
+                        Text(d.fullName + if (d == org.kdx.shell.droid.Distro.UBUNTU) " (recommended)" else "", color = c.text, fontSize = 14.sp)
+                        Text(if (d == org.kdx.shell.droid.Distro.UBUNTU) "Newest KDE Plasma and apps, Ubuntu's software"
+                            else "Debian's stable release", color = c.inactiveText, fontSize = 11.sp)
+                    }
+                }
+            }
+            Button({ state.installDebian() }) { Text(if (state.debianError != null) "Retry" else "Install ${state.linuxBase.label} base") }
         }
+    }
+    confirmSwitch?.let { d ->
+        AlertDialog(
+            onDismissRequest = { confirmSwitch = null },
+            title = { Text("Switch to ${d.fullName}?") },
+            text = { Text("The Linux base is built again from ${d.label}. Everything installed in it is deleted: apt packages, " +
+                "KDE Plasma, WindSystem's drive C: and Flatpak apps (install them again afterwards – with real KDE Plasma on, KDX " +
+                "sets Plasma up again by itself). Your home folder and the WindSystem folder on your phone's storage are kept.") },
+            confirmButton = { TextButton({ confirmSwitch = null; state.switchLinuxBase(d) }) { Text("Switch") } },
+            dismissButton = { TextButton({ confirmSwitch = null }) { Text("Cancel") } },
+        )
     }
 }

@@ -376,7 +376,6 @@ class DroidSystem(private val ctx: Context, val root: File) {
     /** Arch Linux packages (.pkg.tar.gz / .pkg.tar.xz) – a tarball with .PKGINFO. */
     fun installArch(file: File, log: (String) -> Unit) {
         val n = file.name.lowercase()
-        if (n.endsWith(".zst")) throw IOException("zstd-compressed Arch packages are not supported; use a .pkg.tar.xz")
         val files = mutableListOf<String>()
         var info = emptyMap<String, String>()
         TarArchiveInputStream(decompress(n, file.inputStream().buffered())).use { tar ->
@@ -402,7 +401,7 @@ class DroidSystem(private val ctx: Context, val root: File) {
         name.endsWith(".gz") -> GzipCompressorInputStream(input)
         name.endsWith(".xz") -> XZCompressorInputStream(input)
         name.endsWith(".bz2") -> BZip2CompressorInputStream(input)
-        name.endsWith(".zst") -> throw IOException("zstd-compressed packages are not supported")
+        name.endsWith(".zst") -> com.github.luben.zstd.ZstdInputStream(input)
         else -> input
     }
 

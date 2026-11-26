@@ -61,7 +61,7 @@ sealed interface Launchable {
         override val label get() = entry.name
         override val subtitle get() = when (entry.source) {
             org.kdx.shell.droid.DroidSystem.EntrySource.FLATHUB -> "Flatpak (Flathub) · "
-            org.kdx.shell.droid.DroidSystem.EntrySource.DEBIAN -> "Debian · "
+            org.kdx.shell.droid.DroidSystem.EntrySource.DEBIAN -> "Linux (apt) · "
             else -> if (entry.flatpakId != null) "Flatpak · " else "DroidSystem · "
         } + entry.comment.ifEmpty { "Linux app" }
     }

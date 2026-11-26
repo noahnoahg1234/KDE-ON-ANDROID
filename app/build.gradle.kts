@@ -66,6 +66,7 @@ android {
             project.findProperty("kdx.crashExe")?.let { d -> it.systemProperty("kdx.crashExe", d.toString()) }
             project.findProperty("kdx.windFresh")?.let { d -> it.systemProperty("kdx.windFresh", d.toString()) }
             project.findProperty("kdx.arch")?.let { d -> it.systemProperty("kdx.arch", d.toString()) }
+            project.findProperty("kdx.distro")?.let { d -> it.systemProperty("kdx.distro", d.toString()) }
             project.findProperty("kdx.pack")?.let { d -> it.systemProperty("kdx.pack", d.toString()); it.outputs.upToDateWhen { false } }
             project.findProperty("kdx.wind")?.let { d -> it.systemProperty("kdx.wind", d.toString()); it.outputs.upToDateWhen { false } }
             project.findProperty("kdx.proot")?.let { d -> it.systemProperty("kdx.proot", d.toString()) }
@@ -108,6 +109,9 @@ dependencies {
     // Archive formats for DroidSystem (.deb = ar + tar.{gz,xz,bz2})
     implementation("org.apache.commons:commons-compress:1.27.1")
     implementation("org.tukaani:xz:1.10")
+    // zstd: Ubuntu's packages are compressed with it (Android version with its native libraries; the desktop jar for tests)
+    implementation("com.github.luben:zstd-jni:1.5.7-4@aar")
+    testImplementation("com.github.luben:zstd-jni:1.5.7-4")
     // Tor (The Tor Project / Guardian Project build) for the Privacy VPN. Pure Java; its newer Kotlin stdlib isn't needed.
     // 0.4.9.8 is the newest release whose classes (Java 21) AGP 8.7's D8 can read; later ones are Java 24 bytecode.
     implementation("info.guardianproject:tor-android:0.4.9.8") { exclude(group = "org.jetbrains.kotlin") }

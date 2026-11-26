@@ -37,14 +37,19 @@ It runs as a **home-screen launcher**, so it can fully replace your Android home
 | **Info Center** | Software, hardware and display information |
 | **System Settings** | Wallpaper, colours, desktops, panel, widgets, clock, shortcuts, Android integration |
 
-## Linux system: DroidSystem 2 (Debian-based)
-Turn it on in **System Settings → Linux System (DroidSystem)**. DroidSystem 2 is **based on Debian** and runs real
-Linux software:
+## Linux system: DroidSystem 2 (Ubuntu-based)
+Turn it on in **System Settings → Linux System (DroidSystem)**. DroidSystem 2 is **based on Ubuntu 26.04 LTS** (or
+Debian 13 "trixie" if you pick it) and runs real Linux software:
 
-- **Real Debian** – KDX builds it like `debootstrap` does: it downloads the official Debian trixie packages for your
-  phone's CPU (arm64, armhf or amd64; about 35 MB, SHA-256 verified) and installs them, then adds the DroidSystem layer
-  (branding, apt settings for proot, tools). It runs with **proot** (bundled, from Termux), so no root is needed.
-- **apt works** in Konsole (`apt install cowsay`, `apt install gnome-mines`, …) – Konsole is a real Debian `bash`.
+- **Real Ubuntu** – KDX builds it like `debootstrap` does: it downloads the official Ubuntu packages for your phone's
+  CPU (arm64 from Ubuntu's ports server, amd64 from the main archive; about 31 MB, SHA-256 verified, zstd-compressed)
+  and installs them, then adds the DroidSystem layer (branding, apt settings for proot, tools). It runs with
+  **proot** (bundled, from Termux), so no root is needed. Ubuntu brings the newest KDE Plasma (6.6) and apps.
+- **Ubuntu or Debian** – choose before installing (Linux base → Ubuntu 26.04 LTS / Debian 13). An existing Debian
+  DroidSystem keeps working; **Switch to Ubuntu** rebuilds it from Ubuntu (installed packages, KDE Plasma, WindSystem's
+  drive C: and Flatpak apps are deleted; the home folder and the WindSystem folder on the phone's storage stay).
+- **apt works** in Konsole (`apt install cowsay`, `apt install gnome-mines`, …) – Konsole is a real `bash`, and apt
+  installs from Ubuntu's main, universe, restricted and multiverse (x86 packages for WindSystem from Ubuntu's archive).
 - **Linux apps with windows** each get **their own KDX window** with the app's **title** (live, e.g. the open
   document) and **icon** in the title bar and panel. Behind each window is its own X display (TigerVNC + Openbox,
   no extra title bar, app maximized) that **resizes to fit the window**. The **mouse pointer is hidden**, and input
@@ -162,6 +167,15 @@ X apps only understand a mouse, so touches are translated (`TouchTranslator`):
 - **Hardware keyboards:** F-keys, Insert, Print, Caps Lock and modifiers go straight to X (with auto-repeat).
   Ctrl/Alt/Super shortcuts work, and AltGr characters (@, €…) come out right. The on-screen keyboard stays down
   while a hardware keyboard is connected.
+
+## Side dock (Ubuntu-like layout)
+
+System Settings → Workspace → **Taskbar**: Bottom panel, Top panel, **Side dock, left (like Ubuntu)** or Side dock,
+right. The side docks put the apps along the side – pinned apps first, open apps marked with dots (one per window),
+the active one highlighted, **Show Applications** at the end – and a thin top bar with **Activities** (overview), the
+date and time in the middle (tap for the calendar) and status icons. Tap a dock icon to open the app, switch to it, or
+minimise it; long-press for its windows, *New window*, *Pin/Unpin* and *Close*. In PC desktop mode the desktop also
+shows the phone's main folders (Home, Downloads, Documents, Pictures), which open in Dolphin.
 
 ## Desktop widgets
 

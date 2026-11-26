@@ -22,6 +22,13 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderShared
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,7 +65,18 @@ private fun ShellContent(state: KdxState) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val compact = maxWidth < 600.dp
         WallpaperLayer(state)
-        Column(Modifier.fillMaxSize().imePadding()) {
+        if (state.panelPosition.isDock) Column(Modifier.fillMaxSize().imePadding()) {
+            // Ubuntu-like: a top bar, and the dock along the side
+            TopBar(state, compact, Modifier.statusBarsPadding())
+            Row(Modifier.weight(1f).fillMaxWidth().navigationBarsPadding()) {
+                if (state.panelPosition == org.kdx.shell.core.PanelPosition.LEFT_DOCK) Dock(state)
+                Box(Modifier.weight(1f).fillMaxHeight()) {
+                    DesktopLayer(state, compact)
+                    WindowLayer(state)
+                }
+                if (state.panelPosition == org.kdx.shell.core.PanelPosition.RIGHT_DOCK) Dock(state)
+            }
+        } else Column(Modifier.fillMaxSize().imePadding()) {
             if (state.panelOnTop) Panel(state, compact, Modifier.statusBarsPadding())
             Box(
                 Modifier.weight(1f).fillMaxWidth().then(
@@ -275,10 +293,32 @@ private fun PcDesktop(state: KdxState) {
                 verticalArrangement = Arrangement.spacedBy(2.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
+                // the phone's main folders, like a computer's desktop – they open in Dolphin
+                items(desktopFolders(), key = { "folder:" + it.second.path }) { (name, dir) -> FolderTile(state, name, dir) }
                 items(favs, key = { it.key }) { AppTile(state, it, iconSize = 40.dp, textColor = Color.White, shadow = true) }
             }
         }
         if (widgets && wideEnough) Column(Modifier.align(Alignment.TopEnd).width(240.dp).verticalScroll(rememberScrollState())) { Widgets(state, compact = true) }
+    }
+}
+
+private fun desktopFolders(): List<Pair<String, java.io.File>> {
+    val sd = android.os.Environment.getExternalStorageDirectory()
+    return listOf("Home" to sd, "Downloads" to java.io.File(sd, "Download"), "Documents" to java.io.File(sd, "Documents"),
+        "Pictures" to java.io.File(sd, "Pictures"))
+}
+
+@Composable
+private fun FolderTile(state: KdxState, name: String, dir: java.io.File) {
+    Column(
+        Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp)).clickable { state.open(KApp.DOLPHIN, dir.path) }
+            .padding(6.dp).width(76.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(if (name == "Home") Icons.Filled.FolderShared else Icons.Filled.Folder, name,
+            tint = Color(0xFF3DAEE9), modifier = Modifier.size(44.dp))
+        Text(name, color = Color.White, fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            style = MaterialTheme.typography.bodySmall.copy(shadow = androidx.compose.ui.graphics.Shadow(Color.Black, blurRadius = 6f)))
     }
 }
 

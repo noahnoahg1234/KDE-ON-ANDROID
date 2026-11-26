@@ -288,6 +288,25 @@ private fun SystemTray(state: KdxState, compact: Boolean) {
     }
 }
 
+/** Status icons for the dock layout's top bar: clipboard, quick settings and the battery. */
+@Composable
+internal fun TrayIcons(state: KdxState) {
+    val c = LocalBreeze.current
+    val battery = rememberBattery()
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        PanelIcon(Icons.Filled.ContentPaste, "Klipper", false) { state.open(KApp.KLIPPER) }
+        PanelIcon(Icons.Filled.Tune, "Quick settings", false) { state.openAndroidSettings() }
+        if (battery.level >= 0) Row(
+            Modifier.clip(RoundedCornerShape(4.dp)).clickable { state.open(KApp.SYSMON) }.padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(if (battery.charging) Icons.Filled.BatteryChargingFull else Icons.Filled.BatteryFull, "Battery",
+                tint = if (battery.level <= 15 && !battery.charging) c.negative else c.panelText, modifier = Modifier.size(18.dp))
+            Text("${battery.level}%", color = c.panelText, fontSize = 12.sp)
+        }
+    }
+}
+
 /** Digital clock popup with a month calendar, like Plasma's clock applet. */
 @Composable
 fun CalendarPopup(state: KdxState) {

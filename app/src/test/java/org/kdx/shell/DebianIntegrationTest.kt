@@ -16,7 +16,7 @@ import org.kdx.shell.droid.LinuxAudio
 import java.io.File
 
 /**
- * Builds a real DroidSystem 2 (Debian) on this machine with the host's proot and exercises it.
+ * Builds a real DroidSystem 2 (Debian, or Ubuntu with -Pkdx.distro=UBUNTU) on this machine with the host's proot and exercises it.
  * Slow and networked, so it only runs with -Dkdx.integration=/path/to/workdir.
  */
 @FixMethodOrder(MethodSorters.NAME_ASCENDING)
@@ -24,6 +24,8 @@ class DebianIntegrationTest {
     private val work = System.getProperty("kdx.integration")?.let { File(it) }
     /** -Pkdx.arch=arm64 builds an ARM64 DroidSystem (runs through qemu-user binfmt on an x86 machine). */
     private val arch = System.getProperty("kdx.arch") ?: "amd64"
+    /** -Pkdx.distro=UBUNTU builds DroidSystem from Ubuntu instead of Debian. */
+    private val distro = org.kdx.shell.droid.Distro.valueOf(System.getProperty("kdx.distro") ?: "DEBIAN")
     private val sys by lazy {
         DebianSystem(File(work, "rootfs"), ProotConfig(System.getProperty("kdx.proot") ?: "/usr/bin/proot"), File(work, "home"), arch,
             mirror = "https://deb.debian.org/debian", securityMirror = "https://deb.debian.org/debian-security").apply {
@@ -37,7 +39,7 @@ class DebianIntegrationTest {
         assumeTrue(work != null)
         if (sys.isInstalled) return
         var last = ""
-        sys.bootstrap(DebianRepo(mirror = "https://deb.debian.org/debian", arch = arch), File(work, "cache"), { p, m -> if (m != last) { println("[%3.0f%%] %s".format(p * 100, m)); last = m } }, ::log)
+        sys.bootstrap(DebianRepo(mirror = distro.mirror(arch), suite = distro.suite, arch = arch), File(work, "cache"), { p, m -> if (m != last) { println("[%3.0f%%] %s".format(p * 100, m)); last = m } }, ::log)
         assertTrue(sys.isInstalled)
         trustTestProxy()
     }

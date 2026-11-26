@@ -38,6 +38,12 @@ class DebianSystem(
 ) {
     private val stateDir get() = File(root, "var/lib/droidsystem")
     val isInstalled get() = File(stateDir, "installed").isFile
+
+    /** The distribution this DroidSystem is built from (installs from before Ubuntu was offered are Debian). */
+    val distro: Distro get() =
+        Distro.fromMarker(runCatching { File(stateDir, "installed").readText() }.getOrNull())
+            ?: Distro.fromMarker(runCatching { File(stateDir, "distro").readText() }.getOrNull())
+            ?: Distro.DEBIAN
     val flatpakHome get() = File(root, "root/.local/share/flatpak")
     fun hasCommand(path: String) = Files.exists(Paths.get(root.path, path), LinkOption.NOFOLLOW_LINKS)
 
@@ -114,11 +120,13 @@ class DebianSystem(
      *  4. apply the DroidSystem layer (branding, apt settings for proot, tools)
      */
     fun bootstrap(repo: DebianRepo, cache: File, progress: (Float, String) -> Unit, log: (String) -> Unit = {}) {
-        progress(0.01f, "Reading Debian package index")
+        val distro = Distro.fromMarker(repo.suite) ?: Distro.DEBIAN
+        progress(0.01f, "Reading ${distro.label} package index")
+        stateDir.mkdirs(); File(stateDir, "distro").writeText("${distro.suite}\n")
         repo.load(cache)
-        val pkgs = repo.minbase()
+        val pkgs = repo.minbase(distro.baseExtra)
         val total = pkgs.sumOf { it.size }.coerceAtLeast(1)
-        log("Selected ${pkgs.size} packages (${total / 1048576} MiB) from Debian ${repo.suite}/${repo.arch}")
+        log("Selected ${pkgs.size} packages (${total / 1048576} MiB) from ${distro.label} ${repo.suite}/${repo.arch}")
 
         // 1. download
         val archives = File(root, "var/cache/apt/archives")
@@ -221,12 +229,9 @@ class DebianSystem(
     fun applyDroidLayer() {
         val apt = File(root, "etc/apt")
         File(apt, "sources.list.d").mkdirs()
-        File(apt, "sources.list.d/debian.sources").writeText(
-            "Types: deb\nURIs: $mirror\nSuites: trixie trixie-updates\nComponents: main contrib non-free non-free-firmware\n" +
-                "Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\n" +
-                "Types: deb\nURIs: $securityMirror\nSuites: trixie-security\nComponents: main contrib non-free non-free-firmware\n" +
-                "Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg\n"
-        )
+        val distro = distro
+        Distro.entries.forEach { File(apt, "sources.list.d/${it.name.lowercase()}.sources").delete() }
+        File(apt, "sources.list.d/${distro.name.lowercase()}.sources").writeText(distro.aptSources(arch))
         File(apt, "sources.list").delete()
         File(apt, "apt.conf.d").mkdirs()
         File(apt, "apt.conf.d/99droidsystem").writeText(
@@ -237,15 +242,12 @@ class DebianSystem(
         writeDpkgConfig()
         File(root, "etc/os-release").let { f ->
             Files.deleteIfExists(f.toPath())
-            f.writeText(
-                "PRETTY_NAME=\"DroidSystem 2.0 (Debian trixie)\"\nNAME=\"DroidSystem\"\nVERSION_ID=\"2.0\"\nVERSION=\"2.0 (Breeze)\"\n" +
-                    "VERSION_CODENAME=trixie\nID=droidsystem\nID_LIKE=debian\nHOME_URL=\"https://github.com/noahnoahg1234/kde-on-android\"\n"
-            )
+            f.writeText(distro.osRelease())
         }
-        File(root, "etc/issue").writeText("DroidSystem 2.0 (Debian trixie) \\n \\l\n\n")
+        File(root, "etc/issue").writeText("DroidSystem 2.0 (${distro.basedOn}) \\n \\l\n\n")
         File(root, "etc/motd").writeText(
-            "  [o_o]  DroidSystem 2.0 \"Breeze\" - based on Debian trixie\n /|___|\\ apt, Linux apps and Flatpak on Android\n   d b\n\n" +
-                " apt install <package>     install Debian software\n flatpak install <app-id>  install from Flathub (setup: flatpak-setup)\n" +
+            "  [o_o]  DroidSystem 2.0 \"Breeze\" - based on ${distro.basedOn}\n /|___|\\ apt, Linux apps and Flatpak on Android\n   d b\n\n" +
+                " apt install <package>     install ${distro.label} software\n flatpak install <app-id>  install from Flathub (setup: flatpak-setup)\n" +
                 " linux-display             start the graphical display for desktop apps\n bazaar                    graphical app store\n\n"
         )
         File(root, "root/.bashrc").writeText(
@@ -330,7 +332,7 @@ class DebianSystem(
     private fun decompress(name: String, input: InputStream): InputStream = when {
         name.endsWith(".xz") -> XZCompressorInputStream(input)
         name.endsWith(".gz") -> GzipCompressorInputStream(input)
-        name.endsWith(".zst") -> throw IOException("zstd-compressed package")
+        name.endsWith(".zst") -> com.github.luben.zstd.ZstdInputStream(input) // Ubuntu's packages
         else -> input
     }
 

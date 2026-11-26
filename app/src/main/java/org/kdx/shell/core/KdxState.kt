@@ -143,7 +143,11 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     }
     var showDesktopIcons by mutableStateOf(prefs.getBoolean("icons", true))
     var use24h by mutableStateOf(prefs.getBoolean("h24", true))
-    var panelOnTop by mutableStateOf(prefs.getBoolean("panelTop", false))
+    /** Where the taskbar is (System Settings → Workspace). Older KDX: "panel at top" on/off. */
+    var panelPosition by mutableStateOf(PanelPosition.entries.firstOrNull { it.name == prefs.getString("panelPos", null) }
+        ?: if (prefs.getBoolean("panelTop", false)) PanelPosition.TOP else PanelPosition.BOTTOM)
+    /** The panel (or the dock's top bar) is at the top: menus and popups open from there. */
+    val panelOnTop get() = panelPosition != PanelPosition.BOTTOM
     var showSeconds by mutableStateOf(prefs.getBoolean("seconds", false))
     /** KDX desktop resolution (System Settings → Desktop): how much fits on the screen. */
     var desktopResolution by mutableStateOf(DesktopResolution.entries.getOrElse(prefs.getInt("deskRes", 0)) { DesktopResolution.PHONE })
@@ -314,9 +318,37 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     var autoInstallDebian = true
 
     /** Downloads Debian and builds DroidSystem 2 on top of it (debootstrap-style, see DebianSystem.bootstrap). */
+    /** The distribution new DroidSystem installs are built from (System Settings → Linux System). */
+    var linuxBase by mutableStateOf(org.kdx.shell.droid.Distro.entries.firstOrNull { it.name == prefs.getString("linuxBase", null) }
+        ?: org.kdx.shell.droid.Distro.UBUNTU); private set
+
+    fun chooseLinuxBase(d: org.kdx.shell.droid.Distro) { linuxBase = d; prefs.edit().putString("linuxBase", d.name).apply() }
+
+    /**
+     * Rebuilds the Linux base from [d]: everything open in it is ended, its files (apt packages, KDE Plasma,
+     * WindSystem's drive C:, Flatpak apps) are deleted, and it's built again. The home folder on shared storage stays.
+     */
+    fun switchLinuxBase(d: org.kdx.shell.droid.Distro) {
+        if (debianProgress != null) return
+        chooseLinuxBase(d)
+        val old = debian ?: debianFor(droid)
+        windows.filter { it.app == KApp.LINUXDISPLAY || it.app == KApp.WINDSYSTEM }.toList().forEach { close(it) }
+        attachDebian(null)
+        debianProgress = 0f to "Removing the old Linux base"
+        viewModelScope.launch(guard) {
+            withContext(Dispatchers.IO) {
+                runCatching { org.kdx.shell.droid.Procs.stopEnv("HOSTNAME=droidsystem") }
+                old.root.deleteTree()
+            }
+            debianProgress = null
+            installDebian()
+        }
+    }
+
     fun installDebian() {
         if (debianProgress != null) return
         val sys = debianFor(droid)
+        val base = linuxBase
         debianError = null
         debianLog.clear()
         debianProgress = 0f to "Starting"
@@ -324,14 +356,14 @@ class KdxState(app: Application) : AndroidViewModel(app) {
             val r = withContext(Dispatchers.IO) {
                 runCatching {
                     sys.bootstrap(
-                        org.kdx.shell.droid.DebianRepo(arch = sys.arch), File(ctx.cacheDir, "debian"),
+                        org.kdx.shell.droid.DebianRepo(mirror = base.mirror(sys.arch), suite = base.suite, arch = sys.arch), File(ctx.cacheDir, "debian"),
                         progress = { p, m -> viewModelScope.launch(guard) { debianProgress = p to m } },
                         log = { line -> viewModelScope.launch(guard) { debianLog += line; while (debianLog.size > 300) debianLog.removeAt(0) } },
                     )
                 }
             }
             debianProgress = null
-            r.onSuccess { attachDebian(sys); refreshLinuxApps(); toast("DroidSystem 2 (Debian) is ready") }
+            r.onSuccess { attachDebian(sys); refreshLinuxApps(); toast("DroidSystem 2 (${base.fullName}) is ready") }
                 .onFailure { debianError = it.message ?: it.toString() }
         }
     }
@@ -341,7 +373,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         attachDebian(null)
         viewModelScope.launch(guard) {
             withContext(Dispatchers.IO) { d.root.deleteTree() }
-            refreshLinuxApps(); toast("Debian base removed")
+            refreshLinuxApps(); toast("Linux base removed")
         }
     }
 
@@ -882,7 +914,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         .putString("widgets", DesktopWidget.serialize(desktopWidgets))
         .putBoolean("icons", showDesktopIcons)
         .putBoolean("h24", use24h)
-        .putBoolean("panelTop", panelOnTop)
+        .putString("panelPos", panelPosition.name)
         .putBoolean("seconds", showSeconds)
         .putInt("deskRes", desktopResolution.ordinal)
         .putBoolean("pcDesktop", pcDesktop)
