@@ -418,7 +418,7 @@ private fun DesktopSection(state: KdxState) {
                 else "Android app windows you open from KDX show on its taskbar. To also see apps opened another way – and have " +
                     "them leave the taskbar when closed – allow KDX \"Usage access\".", color = c.inactiveText, fontSize = 12.sp)
             if (!usage) OutlinedButton({ org.kdx.shell.core.AndroidWindows.openUsageAccess(ctx) }) { Text("Allow Usage access") }
-            Toggle("Taskbar over Android apps (keeps all their windows visible)", state.taskbarOverApps) { state.changeTaskbarOverApps(it) }
+            Toggle("Taskbar always on (apps open maximized above it, all their windows stay visible)", state.taskbarOverApps) { state.changeTaskbarOverApps(it) }
             if (state.taskbarOverApps && !org.kdx.shell.shell.OverlayTaskbar.canShow(ctx)) {
                 Text("KDX fills the screen, so touching it hides Android app windows behind it. A taskbar floating over the " +
                     "apps doesn't: allow KDX to \"Display over other apps\".", color = c.inactiveText, fontSize = 12.sp)

@@ -1121,10 +1121,10 @@ class KdxState(app: Application) : AndroidViewModel(app) {
             .setComponent(ComponentName(a.pkg, a.cls))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
         // in a floating window, where Android allows it (otherwise full screen as usual)
-        val opts = if (androidAppWindows && AndroidWindows.supported(ctx)) {
+        val opts = if (androidWindowsActive) {
             val dm = ctx.resources.displayMetrics
-            // apps you maximised open maximised (Android applies a window's size only when the app opens)
-            AndroidWindows.options(if (a.pkg in maximizedApps) desktopMargins().bounds(dm.widthPixels, dm.heightPixels)
+            // maximised above the taskbar unless set to a normal size (Android applies a window's size only when it opens)
+            AndroidWindows.options(if (a.pkg !in normalApps) desktopMargins().bounds(dm.widthPixels, dm.heightPixels)
                 else AndroidWindows.bounds(androidWindowCount++, dm.widthPixels, dm.heightPixels, desktopMargins().bounds(dm.widthPixels, dm.heightPixels)))
         } else null
         runCatching { ctx.startActivity(intent, opts) }
@@ -1192,12 +1192,18 @@ class KdxState(app: Application) : AndroidViewModel(app) {
         }
     fun syncOverlay() = org.kdx.shell.shell.OverlayTaskbar.sync(ctx, this, kdxInFront)
 
-    /** Android apps the user maximised: they open maximised from then on. */
-    private val maximizedApps = mutableStateListOf<String>().apply {
-        addAll((prefs.getString("maxApps", "") ?: "").split('|').filter { it.isNotBlank() })
+    /**
+     * Android apps open maximised to the desktop – the screen above KDX's taskbar, like a PC – except ones set back
+     * to a normal size (Restore size), which open as floating windows from then on.
+     */
+    private val normalApps = mutableStateListOf<String>().apply {
+        addAll((prefs.getString("normalApps", "") ?: "").split('|').filter { it.isNotBlank() })
     }
-    fun isMaximized(a: AndroidApp) = a.pkg in maximizedApps
-    private fun saveMaximized() = prefs.edit().putString("maxApps", maximizedApps.joinToString("|")).apply()
+    fun isMaximized(a: AndroidApp) = a.pkg !in normalApps
+    private fun saveNormalApps() = prefs.edit().putString("normalApps", normalApps.joinToString("|")).apply()
+
+    /** Android apps open in windows: the setting, or the taskbar over apps (which needs windows to keep apps off it). */
+    val androidWindowsActive get() = (androidAppWindows || taskbarOverApps) && AndroidWindows.supported(ctx)
 
     /**
      * Maximises an Android app's window to the desktop – the screen minus KDX's taskbar (or dock) – so the taskbar
@@ -1207,14 +1213,14 @@ class KdxState(app: Application) : AndroidViewModel(app) {
      * maximised the next time.
      */
     fun maximizeAndroidWindow(a: AndroidApp) {
-        if (a.pkg !in maximizedApps) { maximizedApps.add(a.pkg); saveMaximized() }
+        if (normalApps.remove(a.pkg)) saveNormalApps()
         val dm = ctx.resources.displayMetrics
         placeAndroidWindow(a, desktopMargins().bounds(dm.widthPixels, dm.heightPixels), "maximised")
     }
 
     /** Back to a normal-sized window (and it opens normal-sized again). */
     fun restoreAndroidWindow(a: AndroidApp) {
-        if (maximizedApps.remove(a.pkg)) saveMaximized()
+        if (a.pkg !in normalApps) { normalApps.add(a.pkg); saveNormalApps() }
         val dm = ctx.resources.displayMetrics
         placeAndroidWindow(a, AndroidWindows.bounds(androidWindowCount++, dm.widthPixels, dm.heightPixels, desktopMargins().bounds(dm.widthPixels, dm.heightPixels)), "back to a normal size")
     }
@@ -1249,7 +1255,7 @@ class KdxState(app: Application) : AndroidViewModel(app) {
 
     /** With Usage access: follow which Android apps open and close their windows (Android tells KDX nothing otherwise). */
     private fun checkOpenAndroidApps() {
-        if (!androidAppWindows || !AndroidWindows.hasUsageAccess(ctx)) return
+        if (!androidWindowsActive || !AndroidWindows.hasUsageAccess(ctx)) return
         val now = System.currentTimeMillis()
         // each event once: from just after the newest one already applied
         val events = AndroidWindows.usageEvents(ctx, usageCheckedAt, now)

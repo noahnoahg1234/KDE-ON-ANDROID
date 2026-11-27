@@ -19,7 +19,20 @@ class WindowControlService : AccessibilityService() {
     override fun onServiceConnected() { instance = this }
     override fun onUnbind(intent: android.content.Intent?): Boolean { if (instance === this) instance = null; return super.onUnbind(intent) }
     override fun onDestroy() { if (instance === this) instance = null; super.onDestroy() }
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event?.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) checkFullscreen()
+    }
+
+    /** Is the app on top full screen (reaching where the taskbar is)? Then KDX's floating taskbar steps aside. */
+    private fun checkFullscreen() = runCatching {
+        val dm = resources.displayMetrics
+        val top = windows.filter { w ->
+            w.type == AccessibilityWindowInfo.TYPE_APPLICATION && w.root?.packageName?.toString() != packageName
+        }.maxByOrNull { it.layer }
+        val b = top?.let { w -> Rect().also { w.getBoundsInScreen(it) } }
+        org.kdx.shell.shell.OverlayTaskbar.coveredByFullscreen = b != null &&
+            b.width() >= dm.widthPixels * 0.95 && b.bottom >= dm.heightPixels - 40 * dm.density
+    }
     override fun onInterrupt() {}
 
     /** The app window of [pkg] on screen, or null. */

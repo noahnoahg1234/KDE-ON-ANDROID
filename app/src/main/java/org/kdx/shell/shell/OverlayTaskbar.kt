@@ -59,6 +59,9 @@ import org.kdx.shell.core.LocalBreeze
  */
 object OverlayTaskbar {
     private var view: ComposeView? = null
+
+    /** An app is full screen on top (seen by KDX Window Control): the taskbar shrinks to its tab so it covers nothing. */
+    var coveredByFullscreen by mutableStateOf(false)
     private var owner: OverlayOwner? = null
 
     fun canShow(ctx: Context) = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(ctx)
@@ -76,8 +79,9 @@ object OverlayTaskbar {
      */
     fun sync(ctx: Context, state: KdxState, kdxInFront: Boolean) {
         val app = ctx.applicationContext
-        val want = !kdxInFront && state.androidAppWindows && state.taskbarOverApps && canShow(app) &&
-            org.kdx.shell.core.AndroidWindows.supported(app)
+        // always there while apps are in front (they open above it); not without floating windows – then every app
+        // is full screen and the taskbar would cover each one's bottom
+        val want = !kdxInFront && state.taskbarOverApps && canShow(app) && org.kdx.shell.core.AndroidWindows.supported(app)
         if (want && view == null) show(app, state) else if (!want) hide(app)
     }
 
@@ -131,7 +135,7 @@ private fun OverlayBar(state: KdxState) {
     var apps by remember { mutableStateOf(false) }
     // collapsed: just a small tab in the corner (for apps that need the bottom of the screen)
     var collapsed by remember { mutableStateOf(false) }
-    if (collapsed) {
+    if (collapsed || OverlayTaskbar.coveredByFullscreen) {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomEnd) {
             Box(
                 Modifier.padding(6.dp).size(36.dp).clip(RoundedCornerShape(18.dp)).background(c.accent.copy(alpha = 0.85f))

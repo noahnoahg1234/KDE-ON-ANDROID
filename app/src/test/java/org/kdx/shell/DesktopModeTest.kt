@@ -107,16 +107,20 @@ class MaximizedAndroidAppTest {
             val started = shadow.nextStartedActivityForResult ?: return null
             @Suppress("DEPRECATION") return started.options?.getParcelable<android.graphics.Rect>("android:activity.launchBounds")
         }
-        val normal = launchBounds()!!
-        state.maximizeAndroidWindow(a) // Window Control off: remembered for the next start
-        assertTrue(state.isMaximized(a))
-        val max = launchBounds()!!
         val dm = app.resources.displayMetrics
-        assertEquals(state.desktopMargins().bounds(dm.widthPixels, dm.heightPixels), max)
-        assertTrue("bigger than a normal window", max.width() * max.height() > normal.width() * normal.height())
-        assertTrue("taskbar stays visible", max.bottom < dm.heightPixels)
+        val desktop = state.desktopMargins().bounds(dm.widthPixels, dm.heightPixels)
+        // apps open maximised above the taskbar, like a PC
+        assertTrue(state.isMaximized(a))
+        assertEquals(desktop, launchBounds())
+        assertTrue("taskbar stays visible", desktop.bottom < dm.heightPixels)
+        // Restore size: a normal floating window from then on (Window Control off: applied at the next start)
         state.restoreAndroidWindow(a)
         assertFalse(state.isMaximized(a))
+        val normal = launchBounds()!!
+        assertTrue("inside the desktop", desktop.contains(normal))
+        assertTrue("smaller than maximised", normal.width() * normal.height() < desktop.width() * desktop.height())
+        state.maximizeAndroidWindow(a)
+        assertEquals(desktop, launchBounds())
     }
 }
 
@@ -160,7 +164,7 @@ class ManyAndroidWindowsTest {
         android.provider.Settings.Global.putInt(app.contentResolver, "enable_freeform_support", 1)
         org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(true)
         val state = org.kdx.shell.core.KdxState(app)
-        state.androidAppWindows = true
+        state.androidAppWindows = false // always on: doesn't depend on that switch
         val wm = org.robolectric.shadow.api.Shadow.extract<org.robolectric.shadows.ShadowWindowManagerImpl>(app.getSystemService(android.view.WindowManager::class.java))
         org.kdx.shell.shell.OverlayTaskbar.sync(app, state, kdxInFront = false)
         assertEquals("shown over the apps", 1, wm.views.size)
@@ -170,6 +174,12 @@ class ManyAndroidWindowsTest {
                 lp.flags and android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0)
         org.kdx.shell.shell.OverlayTaskbar.sync(app, state, kdxInFront = true)
         assertEquals("KDX in front: its own taskbar", 0, wm.views.size)
+        // an app went full screen anyway: the taskbar shrinks to its tab
+        org.kdx.shell.shell.OverlayTaskbar.coveredByFullscreen = true
+        org.kdx.shell.shell.OverlayTaskbar.sync(app, state, kdxInFront = false)
+        assertEquals("still there (as a tab)", 1, wm.views.size)
+        org.kdx.shell.shell.OverlayTaskbar.coveredByFullscreen = false
+        org.kdx.shell.shell.OverlayTaskbar.hide(app)
         org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(false)
         org.kdx.shell.shell.OverlayTaskbar.sync(app, state, kdxInFront = false)
         assertEquals("not without the permission", 0, wm.views.size)
