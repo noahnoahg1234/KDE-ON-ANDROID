@@ -180,7 +180,20 @@ class ManyAndroidWindowsTest {
         org.kdx.shell.shell.OverlayTaskbar.setCompact(true)
         val small = org.kdx.shell.shell.OverlayTaskbar.layoutParams!!
         assertEquals(android.view.WindowManager.LayoutParams.WRAP_CONTENT, small.width)
-        assertEquals(android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL, small.gravity)
+        val T = org.kdx.shell.shell.OverlayTaskbar
+        val dm = app.resources.displayMetrics
+        assertEquals("right edge", dm.widthPixels - T.handleWidthPx, small.x)
+        assertEquals("halfway down", dm.heightPixels / 2, small.y)
+        // drag it up and over to the left, let go a bit off the edge: it snaps to the left side and stays there
+        T.moveHandle(-(dm.widthPixels * 0.8f), -300f)
+        T.dropHandle()
+        assertTrue(T.handleOnLeft)
+        assertEquals(0, T.layoutParams!!.x)
+        assertEquals(dm.heightPixels / 2 - 300, T.layoutParams!!.y)
+        // remembered when the taskbar comes back
+        T.hide(app); T.sync(app, state, kdxInFront = false); T.setCompact(true)
+        assertEquals(0, T.layoutParams!!.x)
+        assertEquals(dm.heightPixels / 2 - 300, T.layoutParams!!.y)
         org.kdx.shell.shell.OverlayTaskbar.setCompact(false)
         assertEquals(android.view.WindowManager.LayoutParams.MATCH_PARENT, org.kdx.shell.shell.OverlayTaskbar.layoutParams!!.width)
         org.kdx.shell.shell.OverlayTaskbar.hide(app)

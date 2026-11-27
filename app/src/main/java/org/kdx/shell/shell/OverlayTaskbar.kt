@@ -25,6 +25,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -86,6 +88,8 @@ object OverlayTaskbar {
     }
 
     private fun show(ctx: Context, state: KdxState) {
+        appContext = ctx.applicationContext
+        prefs?.let { handleOnLeft = it.getBoolean("handleLeft", false); handleY = it.getInt("handleY", -1) }
         val wm = ctx.getSystemService(WindowManager::class.java)
         val o = OverlayOwner()
         val v = ComposeView(ctx).apply {
@@ -120,11 +124,50 @@ object OverlayTaskbar {
     private fun layout(lp: WindowManager.LayoutParams, compact: Boolean) {
         if (compact) {
             lp.width = WindowManager.LayoutParams.WRAP_CONTENT; lp.height = WindowManager.LayoutParams.WRAP_CONTENT
-            lp.gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            // placed by absolute position: wherever the handle was dragged to (see moveHandle)
+            lp.gravity = Gravity.TOP or Gravity.START
+            val (w, h) = screen()
+            lp.x = if (handleOnLeft) 0 else (w - handleWidthPx).coerceAtLeast(0)
+            lp.y = (if (handleY < 0) h / 2 else handleY).coerceIn(0, (h - handleHeightPx).coerceAtLeast(0))
         } else {
+            lp.x = 0; lp.y = 0
             lp.width = WindowManager.LayoutParams.MATCH_PARENT; lp.height = WindowManager.LayoutParams.WRAP_CONTENT
             lp.gravity = barGravity
         }
+    }
+
+    // ---- the K handle: draggable, snaps to the nearest side, remembered ----
+    private var appContext: Context? = null
+    private val prefs get() = appContext?.getSharedPreferences("kdx", Context.MODE_PRIVATE)
+    /** Which side the handle is on, and how far down (px from the top; -1 = middle). */
+    var handleOnLeft = false; private set
+    var handleY = -1; private set
+    private val density get() = appContext?.resources?.displayMetrics?.density ?: 1f
+    internal val handleWidthPx get() = (HANDLE_W * density).toInt()
+    internal val handleHeightPx get() = (HANDLE_H * density).toInt()
+    const val HANDLE_W = 24
+    const val HANDLE_H = 56
+
+    private fun screen(): Pair<Int, Int> = appContext?.resources?.displayMetrics?.let { it.widthPixels to it.heightPixels } ?: (1080 to 1920)
+
+    /** While dragging: moves the handle by [dx], [dy] px. */
+    internal fun moveHandle(dx: Float, dy: Float) {
+        val lp = params ?: return; val v = view ?: return
+        val (w, h) = screen()
+        lp.x = (lp.x + dx.toInt()).coerceIn(0, (w - handleWidthPx).coerceAtLeast(0))
+        lp.y = (lp.y + dy.toInt()).coerceIn(0, (h - handleHeightPx).coerceAtLeast(0))
+        runCatching { windowManager?.updateViewLayout(v, lp) }
+    }
+
+    /** Drag ended: snap to the nearest side and remember the place. */
+    internal fun dropHandle() {
+        val lp = params ?: return; val v = view ?: return
+        val (w, _) = screen()
+        handleOnLeft = lp.x + handleWidthPx / 2 < w / 2
+        handleY = lp.y
+        lp.x = if (handleOnLeft) 0 else (w - handleWidthPx).coerceAtLeast(0)
+        runCatching { windowManager?.updateViewLayout(v, lp) }
+        prefs?.edit()?.putBoolean("handleLeft", handleOnLeft)?.putInt("handleY", handleY)?.apply()
     }
 
     /** Collapsed (handle only) or the full bar. */
@@ -170,13 +213,21 @@ private fun OverlayBar(state: KdxState) {
     val compact = OverlayTaskbar.collapsed || OverlayTaskbar.coveredByFullscreen
     LaunchedEffect(compact) { OverlayTaskbar.setCompact(compact) }
     if (compact) {
+        val left = OverlayTaskbar.handleOnLeft
+        val shape = if (left) RoundedCornerShape(topEnd = 12.dp, bottomEnd = 12.dp) else RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp)
         Box(
-            Modifier.size(width = 18.dp, height = 56.dp)
-                .clip(RoundedCornerShape(topStart = 10.dp, bottomStart = 10.dp)).background(c.accent.copy(alpha = 0.6f))
+            Modifier.size(width = OverlayTaskbar.HANDLE_W.dp, height = OverlayTaskbar.HANDLE_H.dp)
+                .clip(shape).background(c.accent.copy(alpha = 0.7f))
+                // drag it anywhere up or down either side; tap to bring the taskbar back
+                .pointerInput(Unit) {
+                    detectDragGestures(onDragEnd = { OverlayTaskbar.dropHandle() }, onDragCancel = { OverlayTaskbar.dropHandle() }) { change, d ->
+                        change.consume(); OverlayTaskbar.moveHandle(d.x, d.y)
+                    }
+                }
                 .clickable { OverlayTaskbar.collapsed = false; OverlayTaskbar.coveredByFullscreen = false }
                 .semantics { contentDescription = "Show taskbar" },
             contentAlignment = Alignment.Center,
-        ) { Text("‹", color = Color.White, fontSize = 16.sp) }
+        ) { Text("K", color = Color.White, fontSize = 14.sp) }
         return
     }
     var menuFor by remember { mutableStateOf<AndroidApp?>(null) }

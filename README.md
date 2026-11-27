@@ -200,7 +200,8 @@ System Settings → **Desktop**:
   Android apps open as windows **maximised above it** (the desktop area, like a PC) – so it never covers them. Restore
   size makes an app a normal floating window from then on. An app that goes full screen anyway (Android's own
   maximize button, or opened outside KDX) makes the taskbar shrink to a small K tab while it's on top (needs KDX
-  Window Control to notice); ⌄ hides it by hand. Collapsed, it is only a slim handle on the right edge (its window
+  Window Control to notice); ⌄ hides it by hand. Collapsed, it is only a small K handle – drag it up or down either
+  side (it snaps to the nearest edge and stays there) – (its window
   is just that size, so the rest of the screen gets every tap).
 - **Many Android apps open at once**: KDX fills the screen, and whenever it's touched Android brings it in front of
   every floating window. So while Android app windows are in front, KDX's taskbar **floats over them** (allow
