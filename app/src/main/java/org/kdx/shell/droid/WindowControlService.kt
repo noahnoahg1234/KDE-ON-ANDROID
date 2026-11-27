@@ -78,6 +78,10 @@ class WindowControlService : AccessibilityService() {
     }
 
     companion object {
+        /** Android's lock screen / power menu (only an accessibility service may open them). */
+        fun lockScreen(): Boolean = android.os.Build.VERSION.SDK_INT >= 28 && instance?.performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN) == true
+        fun powerMenu(): Boolean = instance?.performGlobalAction(GLOBAL_ACTION_POWER_DIALOG) == true
+
         @Volatile var instance: WindowControlService? = null
         val isOn get() = instance != null
 

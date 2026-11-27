@@ -392,6 +392,18 @@ private fun DesktopSection(state: KdxState) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val dm = ctx.resources.displayMetrics
     Section("Desktop", Icons.Filled.DesktopWindows) {
+        Text("Style", color = c.text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        org.kdx.shell.core.ShellStyle.entries.forEach { st ->
+            Row(Modifier.fillMaxWidth().clickable { state.changeShellStyle(st) }, verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(state.shellStyle == st, { state.changeShellStyle(st) })
+                Column {
+                    Text(st.label, color = c.text, fontSize = 14.sp)
+                    Text(if (st == org.kdx.shell.core.ShellStyle.DESK) "Dark windows with round buttons, an app strip on the left, a big start menu, folders on the desktop"
+                        else "KDE Plasma's Breeze look", color = c.inactiveText, fontSize = 11.sp)
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
         Text("Resolution", color = c.text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
         Text("Higher = everything smaller and more room, like a computer monitor. Text never gets smaller than readable.",
             color = c.inactiveText, fontSize = 12.sp)

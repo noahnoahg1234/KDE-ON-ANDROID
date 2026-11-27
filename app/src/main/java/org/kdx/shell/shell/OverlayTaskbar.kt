@@ -227,7 +227,7 @@ private fun OverlayBar(state: KdxState) {
                 .clickable { OverlayTaskbar.collapsed = false; OverlayTaskbar.coveredByFullscreen = false }
                 .semantics { contentDescription = "Show taskbar" },
             contentAlignment = Alignment.Center,
-        ) { Text("K", color = Color.White, fontSize = 14.sp) }
+        ) { KdxLogo(20.dp, Color.Transparent) }
         return
     }
     var menuFor by remember { mutableStateOf<AndroidApp?>(null) }
@@ -267,10 +267,11 @@ private fun OverlayBar(state: KdxState) {
         ) {
             // K: KDX's desktop and Kickoff
             Box(
-                Modifier.size(40.dp).clip(RoundedCornerShape(20.dp)).background(c.accent)
-                    .clickable { state.kickoffOpen = true; state.bringKdxToFront() },
+                Modifier.size(40.dp).clip(RoundedCornerShape(20.dp))
+                    .clickable { state.kickoffOpen = true; state.bringKdxToFront() }
+                    .semantics { contentDescription = "KDX menu" },
                 contentAlignment = Alignment.Center,
-            ) { Text("K", color = Color.White, fontSize = 18.sp) }
+            ) { KdxLogo(40.dp) }
             Icon(Icons.Filled.Apps, "Apps", tint = c.panelText, modifier = Modifier.size(40.dp).clip(RoundedCornerShape(6.dp)).clickable { apps = !apps }.padding(8.dp))
             val pinned = state.pinned.mapNotNull { k -> state.androidApps.firstOrNull { it.key == k } }
             pinned.forEach { a -> Box(Modifier.size(40.dp).clip(RoundedCornerShape(6.dp)).clickable { state.launch(a) }, contentAlignment = Alignment.Center) { AppIcon(a, 28) } }

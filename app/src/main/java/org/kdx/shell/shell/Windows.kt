@@ -80,8 +80,9 @@ private fun WindowFrame(state: KdxState, w: KWindow, areaW: Float, areaH: Float,
     Column(
         frameMod
             .clip(shape)
-            .background(c.window)
-            .then(if (!w.maximized) Modifier.border(1.dp, if (active) c.accent.copy(alpha = 0.7f) else c.border, shape) else Modifier)
+            .background(if (state.desk) DESK_FRAME else c.window)
+            .then(if (!w.maximized) Modifier.border(1.dp, if (state.desk) (if (active) c.accent.copy(alpha = 0.8f) else Color(0x33FFFFFF))
+                else if (active) c.accent.copy(alpha = 0.7f) else c.border, shape) else Modifier)
             // Any touch inside the window raises it (click-to-focus).
             .pointerInput(w.id) {
                 awaitEachGesture {
@@ -90,7 +91,7 @@ private fun WindowFrame(state: KdxState, w: KWindow, areaW: Float, areaH: Float,
                 }
             }
     ) {
-        TitleBar(state, w, active, areaW, areaH, density)
+        if (state.desk) DeskTitleBar(state, w, active, areaW, areaH, density) else TitleBar(state, w, active, areaW, areaH, density)
         Box(Modifier.weight(1f).fillMaxWidth()) {
             AppContent(state, w)
             if (!w.maximized) ResizeHandle(w, areaW, areaH, density, Modifier.align(Alignment.BottomEnd))
@@ -140,6 +141,49 @@ private fun TitleBar(state: KdxState, w: KWindow, active: Boolean, areaW: Float,
         Spacer(Modifier.width(4.dp))
     }
     HorizontalDivider(color = c.border)
+}
+
+/** Desk style: dark, see-through window frames. */
+private val DESK_FRAME = Color(0xF01B1F26)
+
+/** Desk style's title bar: thin and dark, the title on the left, small round buttons on the right. */
+@Composable
+private fun DeskTitleBar(state: KdxState, w: KWindow, active: Boolean, areaW: Float, areaH: Float, density: Float) {
+    var menu by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().height(30.dp)
+            .background(if (active) Color(0xFF262B34) else Color(0xFF1E222A))
+            .pointerInput(w.id) { detectTapGestures(onDoubleTap = { state.toggleMaximize(w) }, onLongPress = { menu = true }) }
+            .pointerInput(w.id, w.maximized) {
+                if (!w.maximized) detectDragGestures { change, drag ->
+                    change.consume()
+                    w.x = (w.x + drag.x / density).coerceIn(-w.w + 80f, areaW - 80f)
+                    w.y = (w.y + drag.y / density).coerceIn(0f, areaH - 30f)
+                }
+            }
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box {
+            Box(Modifier.clip(CircleShape).clickable { menu = true }.padding(2.dp)) { WindowIcon(w, 16.dp) }
+            WindowMenu(state, w, menu) { menu = false }
+        }
+        Text(w.title, Modifier.weight(1f).padding(horizontal = 8.dp), color = if (active) Color(0xFFE8EAED) else Color(0xFF9AA0A8),
+            fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        DeskButton(Color(0xFF5F6670), Icons.Filled.Remove, "Minimize") { state.minimize(w) }
+        DeskButton(Color(0xFF5F6670), if (w.maximized) Icons.Filled.FilterNone else Icons.Filled.CropSquare, "Maximize") { state.toggleMaximize(w) }
+        DeskButton(Color(0xFFE5484D), Icons.Filled.Close, "Close") { state.close(w) }
+    }
+}
+
+/** A small round title-bar button (a bigger touch area around it). */
+@Composable
+private fun DeskButton(color: Color, icon: ImageVector, label: String, onClick: () -> Unit) {
+    Box(Modifier.size(30.dp).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(16.dp).clip(CircleShape).background(color), contentAlignment = Alignment.Center) {
+            Icon(icon, label, tint = Color.White.copy(alpha = 0.9f), modifier = Modifier.size(11.dp))
+        }
+    }
 }
 
 @Composable

@@ -149,6 +149,15 @@ class KdxState(app: Application) : AndroidViewModel(app) {
     /** The panel (or the dock's top bar) is at the top: menus and popups open from there. */
     val panelOnTop get() = panelPosition != PanelPosition.BOTTOM
     var showSeconds by mutableStateOf(prefs.getBoolean("seconds", false))
+    /** KDX's look (System Settings → Desktop). Desk turns on the dark theme and the PC-style desktop with it. */
+    var shellStyle by mutableStateOf(ShellStyle.entries.firstOrNull { it.name == prefs.getString("shellStyle", null) } ?: ShellStyle.PLASMA); private set
+    fun changeShellStyle(s: ShellStyle) {
+        shellStyle = s
+        if (s == ShellStyle.DESK) { themeMode = ThemeMode.DARK; if (!pcDesktop) changePcDesktop(true) }
+        prefs.edit().putString("shellStyle", s.name).apply(); save()
+    }
+    val desk get() = shellStyle == ShellStyle.DESK
+
     /** KDX desktop resolution (System Settings → Desktop): how much fits on the screen. */
     var desktopResolution by mutableStateOf(DesktopResolution.entries.getOrElse(prefs.getInt("deskRes", 0)) { DesktopResolution.PHONE })
     /** PC desktop: icons in columns like a computer, pinned apps on the taskbar, apps in floating windows. */
@@ -1172,6 +1181,10 @@ class KdxState(app: Application) : AndroidViewModel(app) {
             h.postDelayed({ if (!bringToFront(w) && w === top) toast("Could not open ${w.label}") }, delayMs + i * 150L)
         }
     }
+
+    /** Start menu → Power: Android's lock screen and power menu need KDX Window Control (an accessibility service). */
+    fun lockScreen() { if (!org.kdx.shell.droid.WindowControlService.lockScreen()) toast("Locking needs KDX Window Control – System Settings → Desktop") }
+    fun powerMenu() { if (!org.kdx.shell.droid.WindowControlService.powerMenu()) toast("The power menu needs KDX Window Control – or hold the phone's power button") }
 
     /** Shows KDX's own desktop (from the taskbar floating over apps). */
     fun bringKdxToFront() {

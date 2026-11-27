@@ -99,7 +99,7 @@ private fun ShellContent(state: KdxState) {
             )
         }
         AnimatedVisibility(state.kickoffOpen, enter = fadeIn(), exit = fadeOut()) {
-            Kickoff(state, compact)
+            if (state.desk) DeskStartMenu(state, compact) else Kickoff(state, compact)
         }
         if (state.calendarOpen) CalendarPopup(state)
         WidgetExplorer(state)
@@ -285,16 +285,23 @@ private fun PcDesktop(state: KdxState) {
     BoxWithConstraints(Modifier.fillMaxSize().padding(8.dp)) {
         val widgets = state.desktopWidgets.isNotEmpty()
         val wideEnough = maxWidth > 520.dp
+        // Desk style: the app strip on the left edge, the desktop's icons after it
+        if (state.desk) SideAppStrip(state, Modifier.align(Alignment.CenterStart))
         if (state.showDesktopIcons) {
             val favs = state.favorites.mapNotNull { state.resolve(it) }
+            val deskFiles = if (state.desk) remember(state.wallpaperVersion) { desktopFolderEntries() } else emptyList()
             androidx.compose.foundation.lazy.grid.LazyHorizontalGrid(
-                GridCells.Adaptive(96.dp),
-                Modifier.fillMaxHeight().padding(end = if (widgets && wideEnough) 250.dp else 0.dp),
+                GridCells.Adaptive(if (state.desk) 110.dp else 96.dp),
+                Modifier.fillMaxHeight().padding(start = if (state.desk) 72.dp else 0.dp, end = if (widgets && wideEnough) 250.dp else 0.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 // the phone's main folders, like a computer's desktop – they open in Dolphin
-                items(desktopFolders(), key = { "folder:" + it.second.path }) { (name, dir) -> FolderTile(state, name, dir) }
+                items(desktopFolders(), key = { "folder:" + it.second.path }) { (name, dir) ->
+                    if (state.desk) DeskFolderTile(state, name, dir) else FolderTile(state, name, dir)
+                }
+                // Desk style: what's in the phone's Desktop folder, as big folder and file icons
+                items(deskFiles, key = { "file:" + it.path }) { f -> DeskFileTile(state, f) }
                 items(favs, key = { it.key }) { AppTile(state, it, iconSize = 40.dp, textColor = Color.White, shadow = true) }
             }
         }
@@ -306,6 +313,20 @@ private fun desktopFolders(): List<Pair<String, java.io.File>> {
     val sd = android.os.Environment.getExternalStorageDirectory()
     return listOf("Home" to sd, "Downloads" to java.io.File(sd, "Download"), "Documents" to java.io.File(sd, "Documents"),
         "Pictures" to java.io.File(sd, "Pictures"))
+}
+
+/** Desk style: a big folder icon. */
+@Composable
+private fun DeskFolderTile(state: KdxState, name: String, dir: java.io.File) {
+    Column(
+        Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp)).clickable { state.open(KApp.DOLPHIN, dir.path) }
+            .padding(6.dp).width(84.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(if (name == "Home") Icons.Filled.FolderShared else Icons.Filled.Folder, name, tint = Color(0xFFF4C04E), modifier = Modifier.size(56.dp))
+        Text(name, color = Color.White, fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            style = MaterialTheme.typography.bodySmall.copy(shadow = androidx.compose.ui.graphics.Shadow(Color.Black, blurRadius = 6f)))
+    }
 }
 
 @Composable

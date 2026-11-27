@@ -15,6 +15,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -281,6 +282,21 @@ class ShellScreenshotTest {
             assertTrue("${app.name}: $log", !log.contains("error", ignoreCase = true))
             assertTrue("${app.name}: toast $toast", toast == null || !toast.contains("wrong"))
         }
+    }
+
+    @Test fun deskStyle() {
+        rule.runOnUiThread { state.changeShellStyle(org.kdx.shell.core.ShellStyle.DESK); state.togglePinned("kdx:KATE") }
+        shot("86-desk-desktop")
+        rule.runOnUiThread { state.open(KApp.KATE); state.open(KApp.KCALC) }
+        shot("87-desk-windows")
+        rule.onAllNodesWithContentDescription("Close")[0].assertExists()
+        rule.runOnUiThread { state.windows.toList().forEach { state.close(it) }; state.kickoffOpen = true }
+        rule.mainClock.advanceTimeBy(600)
+        shot("88-desk-start-menu")
+        rule.onNodeWithText("Power").performClick()
+        rule.mainClock.advanceTimeBy(400)
+        rule.onNodeWithText("Close all windows").assertExists()
+        rule.runOnUiThread { state.closeMenus(); state.changeShellStyle(org.kdx.shell.core.ShellStyle.PLASMA); state.changePcDesktop(false); state.togglePinned("kdx:KATE") }
     }
 
     @Test fun androidWindowsOnTaskbar() {

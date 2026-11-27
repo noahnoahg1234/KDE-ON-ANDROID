@@ -119,13 +119,26 @@ private fun KickoffButton(state: KdxState) {
 
 /** The "K" start-menu glyph. */
 @Composable
-fun KdxLogo(size: androidx.compose.ui.unit.Dp) {
-    val c = LocalBreeze.current
-    Box(
-        Modifier.size(size).clip(CircleShape).background(c.accent),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text("K", color = Color.White, fontWeight = FontWeight.Black, fontSize = (size.value * 0.55f).sp)
+fun KdxLogo(size: androidx.compose.ui.unit.Dp, background: Color = LocalBreeze.current.accent) {
+    // the KDE emblem idea – a "K" inside a gear – drawn for KDX
+    androidx.compose.foundation.Canvas(Modifier.size(size)) {
+        val r = this.size.minDimension / 2
+        val c0 = center
+        drawCircle(background, r)
+        // gear: a ring with 8 teeth
+        val ringR = r * 0.62f; val stroke = r * 0.13f
+        drawCircle(Color.White, ringR, c0, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke))
+        for (i in 0 until 8) {
+            val a = Math.toRadians(i * 45.0 + 22.5)
+            val dir = androidx.compose.ui.geometry.Offset(kotlin.math.cos(a).toFloat(), kotlin.math.sin(a).toFloat())
+            drawLine(Color.White, c0 + dir * (ringR + stroke * 0.2f), c0 + dir * (ringR + stroke * 1.6f), strokeWidth = stroke * 1.1f)
+        }
+        // K: an upright and two arms, inside the ring
+        val k = ringR * 0.55f; val w = r * 0.12f
+        val x = c0.x - k * 0.45f
+        drawLine(Color.White, androidx.compose.ui.geometry.Offset(x, c0.y - k), androidx.compose.ui.geometry.Offset(x, c0.y + k), strokeWidth = w)
+        drawLine(Color.White, androidx.compose.ui.geometry.Offset(x + w * 0.4f, c0.y + w * 0.2f), androidx.compose.ui.geometry.Offset(c0.x + k * 0.6f, c0.y - k), strokeWidth = w)
+        drawLine(Color.White, androidx.compose.ui.geometry.Offset(x + k * 0.35f, c0.y - k * 0.2f), androidx.compose.ui.geometry.Offset(c0.x + k * 0.65f, c0.y + k), strokeWidth = w)
     }
 }
 

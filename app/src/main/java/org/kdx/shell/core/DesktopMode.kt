@@ -207,3 +207,10 @@ data class DesktopMargins(val left: Int, val top: Int, val right: Int, val botto
         }
     }
 }
+
+/**
+ * KDX's look. PLASMA: KDE Plasma's Breeze look (the default). DESK: KDX's own dark desktop style – dark windows with
+ * thin title bars and round buttons, a strip of round app icons on the desktop's left edge, a big start menu with
+ * large round icons, and big folder icons on the desktop.
+ */
+enum class ShellStyle(val label: String) { PLASMA("Plasma (Breeze)"), DESK("Desk (dark desktop)") }

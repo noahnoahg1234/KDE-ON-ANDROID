@@ -168,6 +168,15 @@ X apps only understand a mouse, so touches are translated (`TouchTranslator`):
   Ctrl/Alt/Super shortcuts work, and AltGr characters (@, €…) come out right. The on-screen keyboard stays down
   while a hardware keyboard is connected.
 
+## Desk style
+
+System Settings → Desktop → Style → **Desk (dark desktop)**: KDX's own dark desktop look – dark windows with thin
+title bars and small round minimize / maximize / close buttons, a strip of round app icons (your pinned apps) on the
+desktop's left edge, a big start menu (search, large round app icons, **Settings**, **Help** and **Power**: close all
+windows, lock the screen, the phone's power menu – the last two need KDX Window Control), and big folder icons on the
+desktop: Home, Downloads, Documents, Pictures, plus whatever is in the phone's *Desktop* folder. It turns on the dark
+theme and the PC desktop. The KDE-style emblem (a K in a gear) is on KDX's taskbar and the taskbar over apps.
+
 ## Side dock (Ubuntu-like layout)
 
 System Settings → Workspace → **Taskbar**: Bottom panel, Top panel, **Side dock, left (like Ubuntu)** or Side dock,
