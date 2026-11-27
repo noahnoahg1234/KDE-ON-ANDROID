@@ -174,6 +174,16 @@ class ManyAndroidWindowsTest {
                 lp.flags and android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0)
         org.kdx.shell.shell.OverlayTaskbar.sync(app, state, kdxInFront = true)
         assertEquals("KDX in front: its own taskbar", 0, wm.views.size)
+        // collapsed: the window is only the handle (a full-width invisible window caught taps along the apps' bottom)
+        org.kdx.shell.shell.OverlayTaskbar.sync(app, state, kdxInFront = false)
+        assertEquals(android.view.WindowManager.LayoutParams.MATCH_PARENT, org.kdx.shell.shell.OverlayTaskbar.layoutParams!!.width)
+        org.kdx.shell.shell.OverlayTaskbar.setCompact(true)
+        val small = org.kdx.shell.shell.OverlayTaskbar.layoutParams!!
+        assertEquals(android.view.WindowManager.LayoutParams.WRAP_CONTENT, small.width)
+        assertEquals(android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL, small.gravity)
+        org.kdx.shell.shell.OverlayTaskbar.setCompact(false)
+        assertEquals(android.view.WindowManager.LayoutParams.MATCH_PARENT, org.kdx.shell.shell.OverlayTaskbar.layoutParams!!.width)
+        org.kdx.shell.shell.OverlayTaskbar.hide(app)
         // an app went full screen anyway: the taskbar shrinks to its tab
         org.kdx.shell.shell.OverlayTaskbar.coveredByFullscreen = true
         org.kdx.shell.shell.OverlayTaskbar.sync(app, state, kdxInFront = false)

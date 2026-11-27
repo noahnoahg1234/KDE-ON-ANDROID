@@ -102,15 +102,47 @@ object OverlayTaskbar {
             // with ALT_FOCUSABLE_IM it goes below the keyboard
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM,
             PixelFormat.TRANSLUCENT,
-        ).apply { gravity = if (state.panelPosition == org.kdx.shell.core.PanelPosition.TOP) Gravity.TOP else Gravity.BOTTOM }
-        runCatching { wm.addView(v, lp); view = v; owner = o }
+        )
+        barGravity = if (state.panelPosition == org.kdx.shell.core.PanelPosition.TOP) Gravity.TOP else Gravity.BOTTOM
+        layout(lp, compact = false)
+        runCatching { wm.addView(v, lp); view = v; owner = o; params = lp; windowManager = wm }
     }
+
+    private var params: WindowManager.LayoutParams? = null
+    private var windowManager: WindowManager? = null
+    private var barGravity = Gravity.BOTTOM
+
+    /**
+     * The taskbar's window is exactly as big as what it shows: the full-width bar, or – collapsed – only the small
+     * handle on the screen's right edge. (A full-width invisible window around the handle caught every tap along the
+     * bottom of the apps.)
+     */
+    private fun layout(lp: WindowManager.LayoutParams, compact: Boolean) {
+        if (compact) {
+            lp.width = WindowManager.LayoutParams.WRAP_CONTENT; lp.height = WindowManager.LayoutParams.WRAP_CONTENT
+            lp.gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        } else {
+            lp.width = WindowManager.LayoutParams.MATCH_PARENT; lp.height = WindowManager.LayoutParams.WRAP_CONTENT
+            lp.gravity = barGravity
+        }
+    }
+
+    /** Collapsed (handle only) or the full bar. */
+    var collapsed by mutableStateOf(false)
+    internal fun setCompact(compact: Boolean) {
+        val lp = params ?: return; val v = view ?: return
+        layout(lp, compact)
+        runCatching { windowManager?.updateViewLayout(v, lp) }
+    }
+
+    /** For tests: the taskbar window's size and place. */
+    internal val layoutParams get() = params
 
     fun hide(ctx: Context) {
         val v = view ?: return
         runCatching { ctx.applicationContext.getSystemService(WindowManager::class.java).removeView(v) }
         owner?.destroy()
-        view = null; owner = null
+        view = null; owner = null; params = null; windowManager = null
     }
 
     /** Lifecycle for Compose in a window that isn't an activity. */
@@ -133,17 +165,18 @@ object OverlayTaskbar {
 private fun OverlayBar(state: KdxState) {
     val c = LocalBreeze.current
     var apps by remember { mutableStateOf(false) }
-    // collapsed: just a small tab in the corner (for apps that need the bottom of the screen)
-    var collapsed by remember { mutableStateOf(false) }
-    if (collapsed || OverlayTaskbar.coveredByFullscreen) {
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomEnd) {
-            Box(
-                Modifier.padding(6.dp).size(36.dp).clip(RoundedCornerShape(18.dp)).background(c.accent.copy(alpha = 0.85f))
-                    .clickable { collapsed = false }
-                    .semantics { contentDescription = "Show taskbar" },
-                contentAlignment = Alignment.Center,
-            ) { Text("K", color = Color.White, fontSize = 16.sp) }
-        }
+    // collapsed (or an app is full screen): only a slim handle on the right edge, halfway up – out of the way of the
+    // buttons apps keep at the bottom
+    val compact = OverlayTaskbar.collapsed || OverlayTaskbar.coveredByFullscreen
+    LaunchedEffect(compact) { OverlayTaskbar.setCompact(compact) }
+    if (compact) {
+        Box(
+            Modifier.size(width = 18.dp, height = 56.dp)
+                .clip(RoundedCornerShape(topStart = 10.dp, bottomStart = 10.dp)).background(c.accent.copy(alpha = 0.6f))
+                .clickable { OverlayTaskbar.collapsed = false; OverlayTaskbar.coveredByFullscreen = false }
+                .semantics { contentDescription = "Show taskbar" },
+            contentAlignment = Alignment.Center,
+        ) { Text("‹", color = Color.White, fontSize = 16.sp) }
         return
     }
     var menuFor by remember { mutableStateOf<AndroidApp?>(null) }
@@ -208,7 +241,7 @@ private fun OverlayBar(state: KdxState) {
             }
             Text(formatTime(rememberNow(), state.use24h, false), color = c.panelText, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 6.dp))
             Icon(Icons.Filled.KeyboardArrowDown, "Hide taskbar", tint = c.panelText,
-                modifier = Modifier.size(36.dp).clip(RoundedCornerShape(6.dp)).clickable { apps = false; collapsed = true }.padding(6.dp))
+                modifier = Modifier.size(36.dp).clip(RoundedCornerShape(6.dp)).clickable { apps = false; OverlayTaskbar.collapsed = true }.padding(6.dp))
         }
     }
 }
